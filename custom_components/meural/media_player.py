@@ -348,7 +348,7 @@ class MeuralEntity(CoordinatorEntity[CloudDataUpdateCoordinator], MediaPlayerEnt
             "name": self.name,
             "manufacturer": "NETGEAR",
             "model": self._meural_device["frameModel"]["name"],
-            "sw_version": self._meural_device["version"],
+            "sw_version": (self.local_coordinator.data or {}).get("version") or self._meural_device["version"],
             "configuration_url": f"http://{self._meural_device['localIp']}/remote/",
         }
 

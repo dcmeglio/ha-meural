@@ -213,6 +213,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "backlight": cached.get("backlight"),
                     "free_space": cached.get("free_space"),
                     "wifi_signal": cached.get("wifi_signal"),
+                    "version": cached.get("version"),
                 }
 
             # Device is awake, get full data
@@ -226,6 +227,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             backlight = None
             free_space = None
             wifi_signal = None
+            version = None
             try:
                 system_info = await self.local_meural.send_get_system()
                 gsensor = system_info.get("gsensor")
@@ -234,6 +236,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 free_space = system_info.get("free_space")
                 wifi_status = system_info.get("wifi_status", {})
                 wifi_signal = wifi_status.get("signal")
+                version = system_info.get("version")
             except (aiohttp.ClientError, asyncio.TimeoutError):
                 pass
 
@@ -246,6 +249,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "backlight": backlight,
                 "free_space": free_space,
                 "wifi_signal": wifi_signal,
+                "version": version,
             }
 
         except (DeviceTurnedOff, aiohttp.ClientError, asyncio.TimeoutError) as err:

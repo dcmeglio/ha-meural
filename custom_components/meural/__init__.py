@@ -68,6 +68,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await local_coordinator.async_config_entry_first_refresh()
         local_coordinators[str(device["id"])] = local_coordinator
 
+    # Register local coordinators with the cloud coordinator so it can
+    # dynamically adjust its polling interval based on device sleep states.
+    for device_id, local_coordinator in local_coordinators.items():
+        cloud_coordinator.register_local_coordinator(device_id, local_coordinator)
+        local_coordinator.cloud_coordinator = cloud_coordinator
+    cloud_coordinator.notify_sleep_state_changed()
+
     # Store meural instance, coordinators, and devices in hass.data
     hass.data[DOMAIN][entry.entry_id] = {
         "meural": meural,
@@ -92,6 +99,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
         )
     )
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        entry_data = hass.data[DOMAIN].pop(entry.entry_id)
+        cloud_coordinator = entry_data["cloud_coordinator"]
+        for device_id in entry_data["local_coordinators"]:
+            cloud_coordinator.unregister_local_coordinator(device_id)
 
     return unload_ok

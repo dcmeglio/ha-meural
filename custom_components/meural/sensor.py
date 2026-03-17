@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
@@ -16,6 +17,7 @@ from homeassistant.const import LIGHT_LUX, SIGNAL_STRENGTH_DECIBELS_MILLIWATT, U
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util.dt import parse_datetime
 
 from .const import DOMAIN
 from .coordinator import CloudDataUpdateCoordinator, LocalDataUpdateCoordinator
@@ -40,8 +42,29 @@ async def async_setup_entry(
         entities.append(MeuralLuxSensor(local_coordinator, device))
         entities.append(MeuralFreeSpaceSensor(local_coordinator, device))
         entities.append(MeuralWifiSignalSensor(local_coordinator, device))
+        entities.append(MeuralLastSeenSensor(cloud_coordinator, device))
 
     async_add_entities(entities)
+
+
+class MeuralCloudSensorBase(CoordinatorEntity[CloudDataUpdateCoordinator], SensorEntity):
+    """Base class for Meural cloud-sourced sensor entities."""
+
+    def __init__(
+        self,
+        coordinator: CloudDataUpdateCoordinator,
+        device: dict[str, Any],
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._device = device
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device information to link this entity to the Meural device."""
+        return {
+            "identifiers": {(DOMAIN, self._device["productKey"])},
+        }
 
 
 class MeuralSensorBase(CoordinatorEntity[LocalDataUpdateCoordinator], SensorEntity):
@@ -145,4 +168,34 @@ class MeuralWifiSignalSensor(MeuralSensorBase):
             return float(raw) if raw is not None else None
         except (ValueError, TypeError):
             return None
+
+
+class MeuralLastSeenSensor(MeuralCloudSensorBase):
+    """Last seen timestamp sensor for a Meural Canvas device."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_registry_enabled_default = True
+
+    def __init__(
+        self,
+        coordinator: CloudDataUpdateCoordinator,
+        device: dict[str, Any],
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, device)
+        self._attr_name = f"{device['alias']} Last Seen"
+        self._attr_unique_id = f"{device['id']}_last_seen"
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the last seen timestamp from cloud frameStatus."""
+        if not self.coordinator.data:
+            return None
+        device = self.coordinator.data.get("devices", {}).get(str(self._device["id"]))
+        if not device:
+            return None
+        raw = device.get("frameStatus", {}).get("lastSeen")
+        if not raw:
+            return None
+        return parse_datetime(raw)
 
