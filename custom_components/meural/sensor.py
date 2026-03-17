@@ -14,6 +14,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import LIGHT_LUX, SIGNAL_STRENGTH_DECIBELS_MILLIWATT, UnitOfInformation
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -120,6 +121,7 @@ class MeuralFreeSpaceSensor(MeuralSensorBase):
     """Free storage space sensor for a Meural Canvas device."""
 
     _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_native_unit_of_measurement = UnitOfInformation.MEGABYTES
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -145,6 +147,7 @@ class MeuralWifiSignalSensor(MeuralSensorBase):
     """WiFi signal strength sensor for a Meural Canvas device."""
 
     _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS_MILLIWATT
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -174,6 +177,7 @@ class MeuralLastSeenSensor(MeuralCloudSensorBase):
     """Last seen timestamp sensor for a Meural Canvas device."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = True
 
     def __init__(
@@ -183,7 +187,7 @@ class MeuralLastSeenSensor(MeuralCloudSensorBase):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator, device)
-        self._attr_name = f"{device['alias']} Last Seen"
+        self._attr_name = f"{device['alias']} Last Cloud Contact"
         self._attr_unique_id = f"{device['id']}_last_seen"
 
     @property
