@@ -59,6 +59,13 @@ class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightE
         self._attr_name = f"{device['alias']} Backlight"
         self._attr_unique_id = f"{device['id']}_backlight"
 
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device information to link this entity to the Meural device."""
+        return {
+            "identifiers": {(DOMAIN, self._device["productKey"])},
+        }
+
     def _meural_brightness(self) -> int | None:
         """Return current backlight as a Meural value (0-100), or None if unavailable."""
         if not self.coordinator.data:

@@ -44,7 +44,27 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MeuralLuxSensor(CoordinatorEntity[LocalDataUpdateCoordinator], SensorEntity):
+class MeuralSensorBase(CoordinatorEntity[LocalDataUpdateCoordinator], SensorEntity):
+    """Base class for Meural sensor entities."""
+
+    def __init__(
+        self,
+        coordinator: LocalDataUpdateCoordinator,
+        device: dict[str, Any],
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._device = device
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device information to link this entity to the Meural device."""
+        return {
+            "identifiers": {(DOMAIN, self._device["productKey"])},
+        }
+
+
+class MeuralLuxSensor(MeuralSensorBase):
     """Ambient light sensor for a Meural Canvas device."""
 
     _attr_device_class = SensorDeviceClass.ILLUMINANCE
@@ -57,8 +77,7 @@ class MeuralLuxSensor(CoordinatorEntity[LocalDataUpdateCoordinator], SensorEntit
         device: dict[str, Any],
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._device = device
+        super().__init__(coordinator, device)
         self._attr_name = f"{device['alias']} Ambient Light"
         self._attr_unique_id = f"{device['id']}_lux"
 
@@ -74,7 +93,7 @@ class MeuralLuxSensor(CoordinatorEntity[LocalDataUpdateCoordinator], SensorEntit
             return None
 
 
-class MeuralFreeSpaceSensor(CoordinatorEntity[LocalDataUpdateCoordinator], SensorEntity):
+class MeuralFreeSpaceSensor(MeuralSensorBase):
     """Free storage space sensor for a Meural Canvas device."""
 
     _attr_device_class = SensorDeviceClass.DATA_SIZE
@@ -87,8 +106,7 @@ class MeuralFreeSpaceSensor(CoordinatorEntity[LocalDataUpdateCoordinator], Senso
         device: dict[str, Any],
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._device = device
+        super().__init__(coordinator, device)
         self._attr_name = f"{device['alias']} Free Space"
         self._attr_unique_id = f"{device['id']}_free_space"
 
@@ -100,7 +118,7 @@ class MeuralFreeSpaceSensor(CoordinatorEntity[LocalDataUpdateCoordinator], Senso
         return self.coordinator.data.get("free_space")
 
 
-class MeuralWifiSignalSensor(CoordinatorEntity[LocalDataUpdateCoordinator], SensorEntity):
+class MeuralWifiSignalSensor(MeuralSensorBase):
     """WiFi signal strength sensor for a Meural Canvas device."""
 
     _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
@@ -113,8 +131,7 @@ class MeuralWifiSignalSensor(CoordinatorEntity[LocalDataUpdateCoordinator], Sens
         device: dict[str, Any],
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._device = device
+        super().__init__(coordinator, device)
         self._attr_name = f"{device['alias']} WiFi Signal"
         self._attr_unique_id = f"{device['id']}_wifi_signal"
 
