@@ -1,8 +1,11 @@
 """Light platform for Meural integration — controls Canvas backlight brightness."""
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
@@ -32,6 +35,7 @@ async def async_setup_entry(
 
     entities = []
     for device in devices:
+        _LOGGER.info("Adding Meural backlight light for device %s", device["alias"])
         local_coordinator = local_coordinators[str(device["id"])]
         entities.append(MeuralBacklightLight(local_coordinator, device))
 
@@ -87,10 +91,12 @@ class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightE
         else:
             # Default to full brightness if no value given
             meural_brightness = 100
+        _LOGGER.info("Meural device %s: Setting backlight to %s%%", self._device["alias"], meural_brightness)
         await self.coordinator.local_meural.send_control_backlight(meural_brightness)
         await self.coordinator.async_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off backlight (set brightness to 0)."""
+        _LOGGER.info("Meural device %s: Turning off backlight", self._device["alias"])
         await self.coordinator.local_meural.send_control_backlight(0)
         await self.coordinator.async_refresh()

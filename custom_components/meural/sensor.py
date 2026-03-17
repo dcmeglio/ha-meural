@@ -1,7 +1,10 @@
 """Sensor platform for Meural integration."""
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -32,6 +35,7 @@ async def async_setup_entry(
 
     entities = []
     for device in devices:
+        _LOGGER.info("Adding Meural sensors for device %s", device["alias"])
         local_coordinator = local_coordinators[str(device["id"])]
         entities.append(MeuralLuxSensor(local_coordinator, device))
         entities.append(MeuralFreeSpaceSensor(local_coordinator, device))
