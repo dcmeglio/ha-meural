@@ -122,6 +122,7 @@ class MeuralFreeSpaceSensor(MeuralSensorBase):
 
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
     _attr_native_unit_of_measurement = UnitOfInformation.MEGABYTES
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -148,6 +149,7 @@ class MeuralWifiSignalSensor(MeuralSensorBase):
 
     _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
     _attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS_MILLIWATT
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -178,7 +180,7 @@ class MeuralLastSeenSensor(MeuralCloudSensorBase):
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_entity_registry_enabled_default = True
+    _attr_entity_registry_enabled_default = False
 
     def __init__(
         self,
