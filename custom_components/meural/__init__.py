@@ -14,7 +14,7 @@ from .coordinator import CloudDataUpdateCoordinator, LocalDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player", "sensor"]
+PLATFORMS = ["media_player", "sensor", "light"]
 
 
 async def async_setup(hass: HomeAssistant, config: dict):

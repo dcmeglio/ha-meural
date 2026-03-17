@@ -66,3 +66,5 @@ class MeuralLuxSensor(CoordinatorEntity[LocalDataUpdateCoordinator], SensorEntit
             return float(raw) if raw is not None else None
         except (ValueError, TypeError):
             return None
+
+

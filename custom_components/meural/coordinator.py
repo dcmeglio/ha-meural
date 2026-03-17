@@ -215,10 +215,12 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Failure here is non-critical; omit the keys so callers can detect absence.
             gsensor = None
             lux = None
+            backlight = None
             try:
                 system_info = await self.local_meural.send_get_system()
                 gsensor = system_info.get("gsensor")
                 lux = system_info.get("lux")
+                backlight = system_info.get("backlight")
             except (aiohttp.ClientError, asyncio.TimeoutError):
                 pass
 
@@ -228,6 +230,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "gallery_status": gallery_status,
                 "gsensor": gsensor,
                 "lux": lux,
+                "backlight": backlight,
             }
 
         except (DeviceTurnedOff, aiohttp.ClientError, asyncio.TimeoutError) as err:
