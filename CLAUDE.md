@@ -42,7 +42,7 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 **LocalDataUpdateCoordinator** (`coordinator.py:124-225`):
 - Polls local device API every 10 seconds
 - Each device has its own local coordinator instance
-- Fetches real-time state: sleep status, local galleries, gallery status, gsensor orientation
+- Fetches real-time state: sleep status, local galleries, gallery status, gsensor orientation, lux, free space, WiFi signal
 - Gracefully handles offline devices without failing the integration
 - Preserves last known sleep state on transient connection failures (no flickering)
 - Returns cached data when device is unreachable
@@ -60,6 +60,19 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 - Controls device directly without cloud dependency
 - Handles device sleep/wake detection
 
+**MeuralBacklightEntity** (`light.py`):
+- Light entity controlling the Canvas backlight brightness
+- Turning off suspends the Canvas device (equivalent to media player turn off)
+- Turning on wakes the Canvas device (equivalent to media player turn on)
+- Uses optimistic state updates for on/off; brightness changes apply immediately
+- Stays in sync with the media player entity — both reflect the same sleep/wake state
+
+**MeuralSensorEntities** (`sensor.py`):
+- **Ambient Light** (`MeuralLuxSensor`): illuminance in lux from local API; useful for automations
+- **Free Space** (`MeuralFreeSpaceSensor`): available Canvas storage in MB from local API; diagnostic
+- **WiFi Signal** (`MeuralWifiSignalSensor`): WiFi signal strength in dBm from local API; diagnostic
+- **Last Cloud Contact** (`MeuralLastSeenSensor`): timestamp of last cloud contact from cloud API; diagnostic
+
 **MeuralEntity** (`media_player.py`):
 - Media player entity implementing standard Home Assistant media player features
 - Coordinates between cloud and local data sources
@@ -70,6 +83,7 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 - Uses optimistic state updates for turn on/off, pause/play, and shuffle so the UI reflects changes instantly
 - Turn on: optimistically sets sleeping=False; device takes several seconds to wake so no immediate refresh (10s poll confirms)
 - Turn off: optimistically sets sleeping=True then confirms with an immediate refresh (device suspends quickly)
+- `sw_version` in `device_info` prefers local firmware version from `send_get_system()`, falls back to cloud value
 - `_cloud_only_galleries()`: computes galleries present in cloud (`device_galleries` + `user_galleries`) but not yet on the local device; used by `source_list`, `async_select_source`, `async_browse_media`, and `async_play_media`
 - Gallery selection tries local device first (via `send_change_gallery`); if not on device, falls back to cloud API (`device_load_gallery`)
 
@@ -97,6 +111,8 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 - `__init__.py`: Integration setup, coordinator initialization
 - `coordinator.py`: Cloud and local data update coordinators
 - `media_player.py`: Media player entity implementation and custom services
+- `light.py`: Backlight light entity
+- `sensor.py`: Sensor entities (ambient light, free space, WiFi signal, last cloud contact)
 - `pymeural.py`: API clients for both cloud and local interfaces
 - `config_flow.py`: Configuration flow for UI setup
 - `const.py`: Constants (update intervals, domain name)

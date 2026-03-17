@@ -37,10 +37,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            _LOGGER.debug("Attempting authentication for %s", user_input["email"])
             try:
                 token, refresh_token = await validate_input(self.hass, user_input)
 
                 await self.async_set_unique_id(user_input["email"], raise_on_progress=False)
+                _LOGGER.info("Successfully authenticated Meural account %s", user_input["email"])
                 return self.async_create_entry(
                     title=user_input["email"],
                     data={
@@ -51,8 +53,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     },
                 )
             except pymeural.CannotConnect:
+                _LOGGER.warning("Cannot connect to Meural API for %s", user_input["email"])
                 errors["base"] = "cannot_connect"
             except pymeural.InvalidAuth:
+                _LOGGER.warning("Invalid credentials for Meural account %s", user_input["email"])
                 errors["base"] = "invalid_auth"
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception")
