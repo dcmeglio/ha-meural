@@ -695,15 +695,13 @@ class MeuralEntity(CoordinatorEntity[CloudDataUpdateCoordinator], MediaPlayerEnt
         # Optimistically mark as awake for immediate UI feedback.
         # No immediate refresh — the device takes several seconds to wake up and would
         # still report sleeping, overriding this update. The 10s poll will confirm.
-        self.local_coordinator._sleeping = False
-        self.async_write_ha_state()
+        self.local_coordinator.set_sleeping_optimistic(False)
 
     async def async_turn_off(self):
         """Suspend Meural frame display."""
         await self.local_meural.send_key_suspend()
         # Optimistically mark as sleeping for immediate UI feedback; refresh confirms.
-        self.local_coordinator._sleeping = True
-        self.async_write_ha_state()
+        self.local_coordinator.set_sleeping_optimistic(True)
         await self._refresh_after_user_action()
 
     async def async_media_pause(self):

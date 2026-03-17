@@ -101,8 +101,7 @@ class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightE
         """Turn on / set brightness. Wakes device first if sleeping."""
         if self.coordinator.sleeping:
             await self.coordinator.local_meural.send_key_resume()
-            self.coordinator._sleeping = False
-            self.async_write_ha_state()
+            self.coordinator.set_sleeping_optimistic(False)
         ha_brightness = kwargs.get(ATTR_BRIGHTNESS)
         if ha_brightness is not None:
             meural_brightness = round(ha_brightness * 100 / 255)
@@ -115,6 +114,5 @@ class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightE
         """Turn off backlight by suspending the Canvas device."""
         _LOGGER.info("Meural device %s: Turning off backlight (suspending device)", self._device["alias"])
         await self.coordinator.local_meural.send_key_suspend()
-        self.coordinator._sleeping = True
-        self.async_write_ha_state()
+        self.coordinator.set_sleeping_optimistic(True)
 

@@ -193,6 +193,13 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Return if device is sleeping."""
         return self._sleeping
 
+    def set_sleeping_optimistic(self, sleeping: bool) -> None:
+        """Set sleep state optimistically and notify all subscribed entities."""
+        self._sleeping = sleeping
+        if self.cloud_coordinator is not None:
+            self.cloud_coordinator.notify_sleep_state_changed()
+        self.async_update_listeners()
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from Meural local device API."""
         try:
