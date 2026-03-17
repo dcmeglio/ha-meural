@@ -9,7 +9,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import LIGHT_LUX, UnitOfInformation
+from homeassistant.const import LIGHT_LUX, SIGNAL_STRENGTH_DECIBELS_MILLIWATT, UnitOfInformation
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -35,6 +35,7 @@ async def async_setup_entry(
         local_coordinator = local_coordinators[str(device["id"])]
         entities.append(MeuralLuxSensor(local_coordinator, device))
         entities.append(MeuralFreeSpaceSensor(local_coordinator, device))
+        entities.append(MeuralWifiSignalSensor(local_coordinator, device))
 
     async_add_entities(entities)
 
@@ -94,4 +95,33 @@ class MeuralFreeSpaceSensor(CoordinatorEntity[LocalDataUpdateCoordinator], Senso
             return None
         return self.coordinator.data.get("free_space")
 
+
+class MeuralWifiSignalSensor(CoordinatorEntity[LocalDataUpdateCoordinator], SensorEntity):
+    """WiFi signal strength sensor for a Meural Canvas device."""
+
+    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: LocalDataUpdateCoordinator,
+        device: dict[str, Any],
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._device = device
+        self._attr_name = f"{device['alias']} WiFi Signal"
+        self._attr_unique_id = f"{device['id']}_wifi_signal"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the current WiFi signal strength in dBm."""
+        if not self.coordinator.data:
+            return None
+        raw = self.coordinator.data.get("wifi_signal")
+        try:
+            return float(raw) if raw is not None else None
+        except (ValueError, TypeError):
+            return None
 
