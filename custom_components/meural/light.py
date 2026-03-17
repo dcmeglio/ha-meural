@@ -58,6 +58,12 @@ class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightE
         self._device = device
         self._attr_name = f"{device['alias']} Backlight"
         self._attr_unique_id = f"{device['id']}_backlight"
+        self._optimistic_brightness: int | None = None
+
+    def _handle_coordinator_update(self) -> None:
+        """Clear optimistic brightness once coordinator confirms the new value."""
+        self._optimistic_brightness = None
+        super()._handle_coordinator_update()
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -84,6 +90,8 @@ class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightE
     @property
     def brightness(self) -> int | None:
         """Return brightness scaled to HA range (0-255)."""
+        if self._optimistic_brightness is not None:
+            return self._optimistic_brightness
         level = self._meural_brightness()
         if level is None:
             return None
@@ -100,6 +108,8 @@ class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightE
             meural_brightness = round(ha_brightness * 100 / 255)
             _LOGGER.info("Meural device %s: Setting backlight to %s%%", self._device["alias"], meural_brightness)
             await self.coordinator.local_meural.send_control_backlight(meural_brightness)
+            self._optimistic_brightness = ha_brightness
+            self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off backlight by suspending the Canvas device."""
