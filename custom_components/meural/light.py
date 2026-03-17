@@ -78,8 +78,8 @@ class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightE
 
     @property
     def is_on(self) -> bool:
-        """Backlight cannot be turned off independently; always on when data is available."""
-        return self.coordinator.data is not None
+        """Return true if the device is awake (backlight is on)."""
+        return self.coordinator.data is not None and not self.coordinator.sleeping
 
     @property
     def brightness(self) -> int | None:
@@ -99,5 +99,12 @@ class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightE
             meural_brightness = 100
         _LOGGER.info("Meural device %s: Setting backlight to %s%%", self._device["alias"], meural_brightness)
         await self.coordinator.local_meural.send_control_backlight(meural_brightness)
+        await self.coordinator.async_refresh()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn off backlight by suspending the Canvas device."""
+        _LOGGER.info("Meural device %s: Turning off backlight (suspending device)", self._device["alias"])
+        await self.coordinator.local_meural.send_key_suspend()
+        self.coordinator._sleeping = True
         await self.coordinator.async_refresh()
 
