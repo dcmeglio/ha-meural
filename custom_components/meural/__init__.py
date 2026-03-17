@@ -10,11 +10,11 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN
 from . import pymeural
-from .coordinator import CloudDataUpdateCoordinator
+from .coordinator import CloudDataUpdateCoordinator, LocalDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player"]
+PLATFORMS = ["media_player", "sensor"]
 
 
 async def async_setup(hass: HomeAssistant, config: dict):
@@ -56,10 +56,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Populate gallery data synchronously so it is available immediately
     await cloud_coordinator.async_refresh_galleries()
 
-    # Store meural instance and coordinator in hass.data
+    # Create and initialize a LocalDataUpdateCoordinator for each device
+    devices = list(cloud_coordinator.data["devices"].values())
+    local_coordinators = {}
+    for device in devices:
+        local_coordinator = LocalDataUpdateCoordinator(
+            hass,
+            device,
+            async_get_clientsession(hass),
+        )
+        await local_coordinator.async_config_entry_first_refresh()
+        local_coordinators[str(device["id"])] = local_coordinator
+
+    # Store meural instance, coordinators, and devices in hass.data
     hass.data[DOMAIN][entry.entry_id] = {
         "meural": meural,
         "cloud_coordinator": cloud_coordinator,
+        "local_coordinators": local_coordinators,
     }
 
     # Forward to platform setup

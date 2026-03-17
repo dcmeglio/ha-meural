@@ -19,7 +19,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.network import get_url
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.components.media_player import MediaClass, MediaType
 
@@ -60,25 +59,15 @@ async def async_setup_entry(
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
     meural = entry_data["meural"]
     cloud_coordinator: CloudDataUpdateCoordinator = entry_data["cloud_coordinator"]
+    local_coordinators: dict[str, LocalDataUpdateCoordinator] = entry_data["local_coordinators"]
 
     # Get devices from cloud coordinator data
     devices = list(cloud_coordinator.data["devices"].values())
 
-    # Create entities with local coordinators
     entities = []
     for device in devices:
         _LOGGER.info("Adding Meural device %s", device['alias'])
-
-        # Create local coordinator for this device
-        local_coordinator = LocalDataUpdateCoordinator(
-            hass,
-            device,
-            async_get_clientsession(hass),
-        )
-
-        # Perform first refresh for local coordinator
-        await local_coordinator.async_config_entry_first_refresh()
-
+        local_coordinator = local_coordinators[str(device["id"])]
         entities.append(
             MeuralEntity(
                 meural,
