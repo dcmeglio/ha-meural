@@ -90,15 +90,15 @@ class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightE
         return math.floor(level * 255 / 100)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn on / set brightness."""
+        """Turn on / set brightness. Wakes device first if sleeping."""
+        if self.coordinator.sleeping:
+            await self.coordinator.local_meural.send_key_resume()
+            self.coordinator._sleeping = False
         ha_brightness = kwargs.get(ATTR_BRIGHTNESS)
         if ha_brightness is not None:
             meural_brightness = round(ha_brightness * 100 / 255)
-        else:
-            # Default to full brightness if no value given
-            meural_brightness = 100
-        _LOGGER.info("Meural device %s: Setting backlight to %s%%", self._device["alias"], meural_brightness)
-        await self.coordinator.local_meural.send_control_backlight(meural_brightness)
+            _LOGGER.info("Meural device %s: Setting backlight to %s%%", self._device["alias"], meural_brightness)
+            await self.coordinator.local_meural.send_control_backlight(meural_brightness)
         await self.coordinator.async_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:

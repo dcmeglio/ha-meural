@@ -174,6 +174,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.device_id = str(device["id"])
         self.local_meural = LocalMeural(device, session)
         self._sleeping = True
+        self.cloud_coordinator: CloudDataUpdateCoordinator | None = None
 
         super().__init__(
             hass,
@@ -196,15 +197,22 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Fetch data from Meural local device API."""
         try:
             # Get sleep status
+            prev_sleeping = self._sleeping
             self._sleeping = await self.local_meural.send_get_sleep()
+            if prev_sleeping != self._sleeping and self.cloud_coordinator is not None:
+                self.cloud_coordinator.notify_sleep_state_changed()
 
             if self._sleeping:
-                # Device is sleeping, return minimal data
+                # Device is sleeping; preserve last known sensor values to avoid unknown state
                 cached = self.data or {}
                 return {
                     "sleeping": True,
                     "galleries": cached.get("galleries", []),
                     "gallery_status": cached.get("gallery_status", {}),
+                    "gsensor": cached.get("gsensor"),
+                    "backlight": cached.get("backlight"),
+                    "free_space": cached.get("free_space"),
+                    "wifi_signal": cached.get("wifi_signal"),
                 }
 
             # Device is awake, get full data
