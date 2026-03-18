@@ -94,6 +94,7 @@ class MeuralLuxSensor(MeuralSensorBase):
     _attr_device_class = SensorDeviceClass.ILLUMINANCE
     _attr_native_unit_of_measurement = LIGHT_LUX
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
 
     def __init__(
         self,
@@ -125,6 +126,7 @@ class MeuralFreeSpaceSensor(MeuralSensorBase):
     _attr_entity_registry_enabled_default = False
     _attr_native_unit_of_measurement = UnitOfInformation.MEGABYTES
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
 
     def __init__(
         self,
@@ -152,6 +154,7 @@ class MeuralWifiSignalSensor(MeuralSensorBase):
     _attr_entity_registry_enabled_default = False
     _attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS_MILLIWATT
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
 
     def __init__(
         self,
@@ -189,7 +192,7 @@ class MeuralLastSeenSensor(MeuralCloudSensorBase):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator, device)
-        self._attr_name = f"{device['alias']} Last Cloud Contact"
+        self._attr_name = f"{device['alias']} Last Seen by Cloud"
         self._attr_unique_id = f"{device['id']}_last_seen"
 
     @property
