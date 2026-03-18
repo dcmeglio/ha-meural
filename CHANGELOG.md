@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ambient light sensor**: New sensor reporting the Canvas ambient light level in lux, sourced from the local device API.
 - **Free Space sensor**: New diagnostic sensor reporting available Canvas storage space in megabytes.
 - **WiFi Signal sensor**: New diagnostic sensor reporting Canvas WiFi signal strength in dBm.
-- **Last Cloud Contact sensor**: New diagnostic sensor reporting the last timestamp the device contacted the Meural cloud, useful for connectivity monitoring.
+- **Last Seen by Cloud sensor**: New diagnostic sensor reporting the last timestamp the device contacted the Meural cloud, useful for connectivity monitoring.
 - **Backlight light entity**: New light entity for the Canvas backlight, allowing brightness control and on/off. Turning the light off suspends the Canvas; turning it on wakes it.
 - **Local firmware version**: The Canvas firmware version shown in Home Assistant is now sourced from the local device API for accuracy.
 
