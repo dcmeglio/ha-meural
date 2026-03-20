@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **orientationMatch detection restored**: Automatic detection of physical device rotation via gsensor is back. The integration reloads the current gallery when the device rotates with orientationMatch enabled, keeping `current_item` metadata accurate.
-- **Ambient light sensor**: New sensor reporting the Canvas ambient light level in lux, sourced from the local device API.
+- **Ambient light sensor**: New sensor reporting the Canvas ambient light level in lux, sourced from the local device API. The local coordinator now polls `send_get_system()` even when the Canvas is sleeping, so the ambient light (lux) sensor — and other local sensors — continue to update every 10 seconds while the device is off. 
 - **Free Space sensor**: New diagnostic sensor reporting available Canvas storage space in megabytes.
 - **WiFi Signal sensor**: New diagnostic sensor reporting Canvas WiFi signal strength in dBm.
 - **Last Seen by Cloud sensor**: New diagnostic sensor reporting the last timestamp the device contacted the Meural cloud, useful for connectivity monitoring.

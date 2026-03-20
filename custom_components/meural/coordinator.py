@@ -210,17 +210,36 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.cloud_coordinator.notify_sleep_state_changed()
 
             if self._sleeping:
-                # Device is sleeping; preserve last known sensor values to avoid unknown state
+                # Device is sleeping; skip gallery fetches but still poll sensor data —
+                # the local web server remains running during sleep mode.
                 cached = self.data or {}
+                gsensor = cached.get("gsensor")
+                lux = cached.get("lux")
+                backlight = cached.get("backlight")
+                free_space = cached.get("free_space")
+                wifi_signal = cached.get("wifi_signal")
+                version = cached.get("version")
+                try:
+                    system_info = await self.local_meural.send_get_system()
+                    gsensor = system_info.get("gsensor")
+                    lux = system_info.get("lux")
+                    backlight = system_info.get("backlight")
+                    free_space = system_info.get("free_space")
+                    wifi_status = system_info.get("wifi_status", {})
+                    wifi_signal = wifi_status.get("signal")
+                    version = system_info.get("version")
+                except (aiohttp.ClientError, asyncio.TimeoutError):
+                    pass  # Fall back to cached values initialized above
                 return {
                     "sleeping": True,
                     "galleries": cached.get("galleries", []),
                     "gallery_status": cached.get("gallery_status", {}),
-                    "gsensor": cached.get("gsensor"),
-                    "backlight": cached.get("backlight"),
-                    "free_space": cached.get("free_space"),
-                    "wifi_signal": cached.get("wifi_signal"),
-                    "version": cached.get("version"),
+                    "gsensor": gsensor,
+                    "lux": lux,
+                    "backlight": backlight,
+                    "free_space": free_space,
+                    "wifi_signal": wifi_signal,
+                    "version": version,
                 }
 
             # Device is awake, get full data
