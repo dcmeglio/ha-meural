@@ -1,12 +1,12 @@
 {
     "config": {
         "abort": {
-            "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
+            "already_configured": "Device is already configured"
         },
         "error": {
-            "cannot_connect": "[%key:common::config_flow::abort::cannot_connect%]",
-            "invalid_auth": "[%key:common::config_flow::abort::invalid_auth%]",
-            "unknown": "[%key:common::config_flow::abort::unknown%]"
+            "cannot_connect": "Failed to connect",
+            "invalid_auth": "Invalid authentication credentials",
+            "unknown": "Unexpected error"
         },
         "step": {
             "user": {
