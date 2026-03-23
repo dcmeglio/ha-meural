@@ -39,10 +39,11 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 - Shared across all devices for a single account
 - Aggregates sleep state across all entities to determine polling interval
 
-**LocalDataUpdateCoordinator** (`coordinator.py:124-225`):
+**LocalDataUpdateCoordinator** (`coordinator.py:163-309`):
 - Polls local device API every 10 seconds
 - Each device has its own local coordinator instance
 - Fetches real-time state: sleep status, local galleries, gallery status, gsensor orientation, lux, free space, WiFi signal
+- When device is sleeping, skips gallery fetches but still polls `send_get_system()` so sensor data (lux, free space, WiFi signal) continues to update every 10 seconds
 - Gracefully handles offline devices without failing the integration
 - Preserves last known sleep state on transient connection failures (no flickering)
 - Returns cached data when device is unreachable
@@ -60,7 +61,7 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 - Controls device directly without cloud dependency
 - Handles device sleep/wake detection
 
-**MeuralBacklightEntity** (`light.py`):
+**MeuralBacklightLight** (`light.py`):
 - Light entity controlling the Canvas backlight brightness
 - Turning off suspends the Canvas device (equivalent to media player turn off)
 - Turning on wakes the Canvas device (equivalent to media player turn on)
@@ -68,10 +69,10 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 - Stays in sync with the media player entity — both reflect the same sleep/wake state
 
 **MeuralSensorEntities** (`sensor.py`):
-- **Ambient Light** (`MeuralLuxSensor`): illuminance in lux from local API; useful for automations
-- **Free Space** (`MeuralFreeSpaceSensor`): available Canvas storage in MB from local API; diagnostic
-- **WiFi Signal** (`MeuralWifiSignalSensor`): WiFi signal strength in dBm from local API; diagnostic
-- **Last Cloud Contact** (`MeuralLastSeenSensor`): timestamp of last cloud contact from cloud API; diagnostic
+- **Ambient Light** (`MeuralLuxSensor`): illuminance in lux from local API; enabled by default; useful for automations
+- **Free Space** (`MeuralFreeSpaceSensor`): available Canvas storage in MB from local API; diagnostic; disabled by default
+- **WiFi Signal** (`MeuralWifiSignalSensor`): WiFi signal strength in dBm from local API; diagnostic; disabled by default
+- **Last Seen by Cloud** (`MeuralLastSeenSensor`): timestamp of last cloud contact from cloud API; diagnostic; disabled by default
 
 **MeuralEntity** (`media_player.py`):
 - Media player entity implementing standard Home Assistant media player features
