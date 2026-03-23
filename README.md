@@ -27,14 +27,14 @@ After restarting go to *Settings*, *Devices & Services*, *Integrations*, and cli
 
 Log in with your NETGEAR account.  
 
-The integration will detect all Canvas devices registered to your account. Each Canvas will become a Media Player entity and can be added to your dashboard using any component that supports it, for example the standard Media Control card. By default your entity's name will correspond to the name of the Canvas, which out-of-the-box consists of a painter's name and 3 digits like `picasso-428` - resulting in the entity `media_player.picasso-428` being created. You can override the name and entity ID in Home Assistant's entity settings.  
-
 **Note 1:** This integration does not yet support NETGEAR's two-step verification method of logging in. Please use the standard login and password method to use this integration.  
 
 **Note 2:** If you are upgrading to v2.0.0 from v1.x, the upgrade is fully backward compatible — no re-configuration or re-authentication is needed. Home Assistant will handle the migration automatically on restart. However, if you are upgrading from v0.x, you have to delete this integration in *Settings*, *Devices & Services*, *Integrations*, and then re-add it to log in again. This will set up the configuration entries required by v1.0.0 and later.  
 
-## Integration
-The integration supports built-in media player service calls to pause, play, play a specific item or playlist/album, go to the next/previous track (artwork), select a source (playlist/album), set shuffle mode, and turn on or turn off.
+### Media Player
+The integration will detect all Canvas devices registered to your account. Each Canvas will become a Media Player entity and can be added to your dashboard using any component that supports it, for example the standard Media Control card. By default your entity's name will correspond to the name of the Canvas, which out-of-the-box consists of a painter's name and 3 digits like `picasso-428` - resulting in the entity `media_player.picasso-428` being created. You can override the name and entity ID in Home Assistant's entity settings.  
+
+It supports built-in media player service calls to pause, play, play a specific item or playlist/album, go to the next/previous track (artwork), select a source (playlist/album), set shuffle mode, and turn on or turn off.
 - `media_player.media_pause`
 - `media_player.media_play`
 - `media_player.play_media`
@@ -54,6 +54,25 @@ Set parameter `media_content_type` to `item` and set parameter `media_content_id
 Set parameter `media_content_type` to `playlist` and parameter `media_content_id` to the gallery ID of the playlist or album that you wish to display. If the playlist is already loaded on the Canvas it will be selected directly; if it is only available in the cloud (i.e. not yet pushed to the Canvas), the integration will load it onto the Canvas via the cloud API first. When typing in gallery IDs manually, please note that albums are represented by a gallery ID on your Canvas that is not the same as their album ID on the Meural servers. To find out the gallery ID on your canvas, browse to `http://YOUR-CANVAS-IP/remote/get_galleries_json/` and locate the `id` tag next to the album or playlist name to use in the service call.
 
 ![Meural Canvas in entity settings](https://raw.githubusercontent.com/GuySie/ha-meural/master/images/entitysettings.png)
+
+### Backlight Light
+A **Light** entity is created for each Canvas to control the backlight brightness. This gives you a familiar light-style interface with a brightness slider, and also allows turning the Canvas on and off from the Lights dashboard or light automations.
+
+- **Turn on**: Wakes the Canvas device and optionally sets a specific brightness level.
+- **Turn off**: Suspends the Canvas device (same as `media_player.turn_off`).
+- **Brightness**: Sets the backlight level from 0–100%. Note that setting brightness via the `meural.set_brightness` service or the media player card simultaneously keeps both entities in sync.
+
+The backlight entity stays in sync with the media player entity — both reflect the same sleep/wake state.
+
+### Sensors
+Four sensor entities are created for each Canvas:
+
+- **Ambient Light** — Illuminance in lux from the local device API. Useful for automations that respond to room lighting conditions. Updates every 10 seconds, including while the Canvas is sleeping.
+- **Free Space** — Available Canvas storage in megabytes from the local device API. Diagnostic; disabled by default.
+- **WiFi Signal** — WiFi signal strength in dBm from the local device API. Diagnostic; disabled by default.
+- **Last Seen by Cloud** — Timestamp of the last time the device contacted the Meural cloud, from the cloud API. Useful for connectivity monitoring. Diagnostic; disabled by default.
+
+To enable a disabled diagnostic sensor, go to *Settings* → *Devices & Services* → *Meural* → select the Canvas device → click on the sensor entity → toggle "Enable entity".
 
 ### Other Services
 Additional services built into this integration are:

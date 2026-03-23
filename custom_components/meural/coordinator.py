@@ -174,6 +174,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.device_id = str(device["id"])
         self.local_meural = LocalMeural(device, session)
         self._sleeping = True
+        self.cloud_coordinator: CloudDataUpdateCoordinator | None = None
 
         super().__init__(
             hass,
@@ -192,29 +193,89 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Return if device is sleeping."""
         return self._sleeping
 
+    def set_sleeping_optimistic(self, sleeping: bool) -> None:
+        """Set sleep state optimistically and notify all subscribed entities."""
+        self._sleeping = sleeping
+        if self.cloud_coordinator is not None:
+            self.cloud_coordinator.notify_sleep_state_changed()
+        self.async_update_listeners()
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from Meural local device API."""
         try:
             # Get sleep status
+            prev_sleeping = self._sleeping
             self._sleeping = await self.local_meural.send_get_sleep()
+            if prev_sleeping != self._sleeping and self.cloud_coordinator is not None:
+                self.cloud_coordinator.notify_sleep_state_changed()
 
             if self._sleeping:
-                # Device is sleeping, return minimal data
+                # Device is sleeping; skip gallery fetches but still poll sensor data —
+                # the local web server remains running during sleep mode.
                 cached = self.data or {}
+                gsensor = cached.get("gsensor")
+                lux = cached.get("lux")
+                backlight = cached.get("backlight")
+                free_space = cached.get("free_space")
+                wifi_signal = cached.get("wifi_signal")
+                version = cached.get("version")
+                try:
+                    system_info = await self.local_meural.send_get_system()
+                    gsensor = system_info.get("gsensor")
+                    lux = system_info.get("lux")
+                    backlight = system_info.get("backlight")
+                    free_space = system_info.get("free_space")
+                    wifi_status = system_info.get("wifi_status", {})
+                    wifi_signal = wifi_status.get("signal")
+                    version = system_info.get("version")
+                except (aiohttp.ClientError, asyncio.TimeoutError):
+                    pass  # Fall back to cached values initialized above
                 return {
                     "sleeping": True,
                     "galleries": cached.get("galleries", []),
                     "gallery_status": cached.get("gallery_status", {}),
+                    "gsensor": gsensor,
+                    "lux": lux,
+                    "backlight": backlight,
+                    "free_space": free_space,
+                    "wifi_signal": wifi_signal,
+                    "version": version,
                 }
 
             # Device is awake, get full data
             galleries = await self.local_meural.send_get_galleries()
             gallery_status = await self.local_meural.send_get_gallery_status()
 
+            # Get gsensor orientation for orientationMatch detection and lux for illuminance sensor.
+            # Failure here is non-critical; omit the keys so callers can detect absence.
+            gsensor = None
+            lux = None
+            backlight = None
+            free_space = None
+            wifi_signal = None
+            version = None
+            try:
+                system_info = await self.local_meural.send_get_system()
+                gsensor = system_info.get("gsensor")
+                lux = system_info.get("lux")
+                backlight = system_info.get("backlight")
+                free_space = system_info.get("free_space")
+                wifi_status = system_info.get("wifi_status", {})
+                wifi_signal = wifi_status.get("signal")
+                version = system_info.get("version")
+            except (aiohttp.ClientError, asyncio.TimeoutError):
+                pass
+
             return {
                 "sleeping": False,
                 "galleries": sorted(galleries, key=lambda i: i["name"]),
                 "gallery_status": gallery_status,
+                "gsensor": gsensor,
+                "lux": lux,
+                "backlight": backlight,
+                "free_space": free_space,
+                "wifi_signal": wifi_signal,
+                "version": version,
             }
 
         except (DeviceTurnedOff, aiohttp.ClientError, asyncio.TimeoutError) as err:

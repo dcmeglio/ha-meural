@@ -5,6 +5,17 @@ All notable changes to the ha-meural Home Assistant integration will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-03-23
+
+### Added
+- **orientationMatch detection restored**: Automatic detection of physical device rotation via gsensor is back. The integration reloads the current gallery when the device rotates with orientationMatch enabled, keeping `current_item` metadata accurate.
+- **Ambient light sensor**: New sensor reporting the Canvas ambient light level in lux, sourced from the local device API. The local coordinator now polls `send_get_system()` even when the Canvas is sleeping, so the ambient light (lux) sensor — and other local sensors — continue to update every 10 seconds while the device is off. 
+- **Free Space sensor**: New diagnostic sensor reporting available Canvas storage space in megabytes. Disabled by default; enable in Home Assistant's entity settings.
+- **WiFi Signal sensor**: New diagnostic sensor reporting Canvas WiFi signal strength in dBm. Disabled by default; enable in Home Assistant's entity settings.
+- **Last Seen by Cloud sensor**: New diagnostic sensor reporting the last timestamp the device contacted the Meural cloud, useful for connectivity monitoring. Disabled by default; enable in Home Assistant's entity settings.
+- **Backlight light entity**: New light entity for the Canvas backlight, allowing brightness control and on/off. Turning the light off suspends the Canvas; turning it on wakes it.
+- **Local firmware version**: The Canvas firmware version shown in Home Assistant is now sourced from the local device API for accuracy.
+
 ## [2.1.0] - 2026-03-03
 
 ### Changed
