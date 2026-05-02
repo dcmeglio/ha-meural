@@ -184,6 +184,10 @@ class PyMeural:
         """Load a gallery on a device."""
         return await self.request("post", f"devices/{device_id}/galleries/{gallery_id}")
 
+    async def delete_device_gallery(self, device_id: str | int, gallery_id: str | int) -> dict[str, Any]:
+        """Remove a gallery from a device."""
+        return await self.request("delete", f"devices/{device_id}/galleries/{gallery_id}")
+
     async def device_load_item(self, device_id: str | int, item_id: str | int) -> dict[str, Any]:
         """Load an item on a device."""
         return await self.request("post", f"devices/{device_id}/items/{item_id}")
