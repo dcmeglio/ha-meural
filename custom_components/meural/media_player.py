@@ -15,7 +15,7 @@ from homeassistant.components import media_source
 from homeassistant.components.http.auth import async_sign_path
 from homeassistant.components.media_player import BrowseError, BrowseMedia
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.network import get_url
@@ -166,7 +166,7 @@ async def async_setup_entry(
         "play_random_cloud_playlist",
         {},
         "async_play_random_cloud_playlist",
-        supports_response=True,
+        supports_response=SupportsResponse.ONLY,
     )
 
     platform.async_register_entity_service(
@@ -641,7 +641,7 @@ class MeuralEntity(CoordinatorEntity[CloudDataUpdateCoordinator], MediaPlayerEnt
         await self.meural.device_load_gallery(self.meural_device_id, gallery["id"])
         await self.local_meural.send_change_gallery(gallery["id"])
         await self._refresh_after_user_action()
-        return gallery["id"]
+        return {"id": gallery["id"], "name": gallery["name"]}
 
     async def async_load_playlist(self, gallery_id=None, gallery_name=None):
         """Load the latest cloud version of a gallery onto the device."""
