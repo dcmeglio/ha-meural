@@ -1004,8 +1004,17 @@ class MeuralEntity(CoordinatorEntity[CloudDataUpdateCoordinator], MediaPlayerEnt
                     album_items = await self.local_meural.send_get_items_by_gallery(g["id"])
                     if album_items:
                         _LOGGER.info("Meural device %s: Browsing media. Replacing missing thumbnail of gallery %s with first gallery item image. Getting information from Meural server for item %s", self.name, g["id"], album_items[0]["id"])
-                        first_item = await self.meural.get_item(album_items[0]["id"])
-                        thumb = first_item["image"]
+                        try:
+                            first_item = await self.meural.get_item(album_items[0]["id"])
+                            thumb = first_item["image"]
+                        except (aiohttp.ClientError, asyncio.TimeoutError, KeyError) as err:
+                            _LOGGER.warning(
+                                "Meural device %s: Browsing media. Could not fetch thumbnail for gallery %s item %s from Meural cloud: %s",
+                                self.name,
+                                g["id"],
+                                album_items[0]["id"],
+                                err,
+                            )
                 _LOGGER.debug("Meural device %s: Browsing media. Thumbnail image for gallery %s is %s", self.name, g["id"], thumb)
 
                 response.children.append(BrowseMedia(

@@ -87,6 +87,7 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 - `sw_version` in `device_info` prefers local firmware version from `send_get_system()`, falls back to cloud value
 - `_cloud_only_galleries()`: computes galleries present in cloud (`device_galleries` + `user_galleries`) but not yet on the local device; used by `source_list`, `async_select_source`, `async_browse_media`, and `async_play_media`
 - Gallery selection tries local device first (via `send_change_gallery`); if not on device, falls back to cloud API (`device_load_gallery`)
+- `async_browse_media` gracefully skips inaccessible playlist thumbnail items: when the cloud API fails to fetch a thumbnail (`aiohttp.ClientError`, `asyncio.TimeoutError`, or missing `image` key), a warning is logged and browsing continues without a thumbnail
 
 ### Authentication Flow
 
