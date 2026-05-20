@@ -96,7 +96,7 @@ class PyMeural:
         self.token_update_callback = token_update_callback
         self._auth_lock = asyncio.Lock()
 
-    async def request(self, method: str, path: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def request(self, method: str, path: str, data: dict[str, Any] | None = None, timeout: int = 10) -> dict[str, Any]:
         fetched_new_token = self.token is None
         if self.token is None:
             await self.get_new_token()
@@ -107,7 +107,7 @@ class PyMeural:
                 kwargs["params"] = data
             else:
                 kwargs["json"] = data
-        with async_timeout.timeout(10):
+        with async_timeout.timeout(timeout):
             try:
                 resp = await self.session.request(
                     method,
@@ -182,7 +182,7 @@ class PyMeural:
 
     async def device_load_gallery(self, device_id: str | int, gallery_id: str | int) -> dict[str, Any]:
         """Load a gallery on a device."""
-        return await self.request("post", f"devices/{device_id}/galleries/{gallery_id}")
+        return await self.request("post", f"devices/{device_id}/galleries/{gallery_id}", timeout=30)
 
     async def delete_device_gallery(self, device_id: str | int, gallery_id: str | int) -> dict[str, Any]:
         """Remove a gallery from a device."""
