@@ -641,7 +641,7 @@ class MeuralEntity(CoordinatorEntity[CloudDataUpdateCoordinator], MediaPlayerEnt
         await self.meural.device_load_gallery(self.meural_device_id, gallery["id"])
         await self.local_meural.send_change_gallery(gallery["id"])
         await self._refresh_after_user_action()
-        return {"gallery_id": gallery["id"]}
+        return gallery["id"]
 
     async def async_load_playlist(self, gallery_id=None, gallery_name=None):
         """Load the latest cloud version of a gallery onto the device."""
