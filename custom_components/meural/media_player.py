@@ -166,7 +166,7 @@ async def async_setup_entry(
         "play_random_cloud_playlist",
         {},
         "async_play_random_cloud_playlist",
-        supports_response=SupportsResponse.ONLY,
+        supports_response=SupportsResponse.OPTIONAL,
     )
 
     platform.async_register_entity_service(
