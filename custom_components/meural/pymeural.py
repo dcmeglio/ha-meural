@@ -3,103 +3,73 @@ from __future__ import annotations
 import asyncio
 import logging
 import json
+import time
 from typing import Any, Callable
 
 import aiohttp
-import async_timeout
-import boto3
 
 from aiohttp.client_exceptions import ClientResponseError
 
 from homeassistant.exceptions import HomeAssistantError
 
+from .netgear_auth import (
+    AuthResult,
+    InvalidAuth,
+    NetgearAuthenticator,
+)
+
 _LOGGER = logging.getLogger(__name__)
 
-BASE_URL = "https://api.meural.com/v0/"
-
-AUTH_CLIENT_NAME = "cognito-idp"
-AUTH_CLIENT_REGION = "eu-west-1"
-AUTH_CLIENT_CLIENTID = "487bd4kvb1fnop6mbgk8gu5ibf"
+BASE_URL = "https://api.meural.com/v1/"
 
 
 async def authenticate(
-    session: aiohttp.ClientSession, username: str, password: str
-) -> tuple[str, str]:
-    """Authenticate and return access token and refresh token."""
-    _LOGGER.info('Meural: Authenticating with username and password')
-
-    def initiate_auth():
-        client = boto3.client(AUTH_CLIENT_NAME, region_name=AUTH_CLIENT_REGION)
-        return client.initiate_auth(
-            ClientId=AUTH_CLIENT_CLIENTID,
-            AuthFlow="USER_PASSWORD_AUTH",
-            AuthParameters={"USERNAME": username, "PASSWORD": password},
-        )
-
-    response = await asyncio.to_thread(initiate_auth)
-
-    if "AuthenticationResult" in response:
-        auth_result = response["AuthenticationResult"]
-        access_token = auth_result["AccessToken"]
-        refresh_token = auth_result.get("RefreshToken", "")
-        _LOGGER.debug("Meural: Authentication successful, tokens received")
-        return access_token, refresh_token
-
-    raise InvalidAuth
+    session: aiohttp.ClientSession,
+    username: str,
+    password: str,
+    trust_id: str | None = None,
+) -> AuthResult:
+    """Authenticate through Netgear Accounts and return Meural OAuth tokens."""
+    _LOGGER.info("Meural: Starting interactive Netgear authentication")
+    authenticator = NetgearAuthenticator(session, trust_id)
+    return await authenticator.authenticate(username, password)
 
 
 async def refresh_access_token(
-    session: aiohttp.ClientSession, refresh_token: str
-) -> str:
-    """Refresh access token using refresh token."""
-    _LOGGER.info('Meural: Refreshing access token using refresh token')
+    session: aiohttp.ClientSession,
+    refresh_token: str,
+    trust_id: str | None = None,
+) -> AuthResult:
+    """Refresh Meural OAuth tokens through Netgear Accounts."""
+    _LOGGER.info("Meural: Refreshing access token through Netgear Accounts")
+    authenticator = NetgearAuthenticator(session, trust_id)
+    return await authenticator.refresh(refresh_token)
 
-    def initiate_auth_refresh():
-        client = boto3.client(AUTH_CLIENT_NAME, region_name=AUTH_CLIENT_REGION)
-        return client.initiate_auth(
-            ClientId=AUTH_CLIENT_CLIENTID,
-            AuthFlow="REFRESH_TOKEN_AUTH",
-            AuthParameters={"REFRESH_TOKEN": refresh_token},
-        )
-
-    try:
-        response = await asyncio.to_thread(initiate_auth_refresh)
-
-        if "AuthenticationResult" in response:
-            access_token = response["AuthenticationResult"]["AccessToken"]
-            _LOGGER.debug("Meural: Access token refreshed successfully")
-            return access_token
-    except Exception as err:
-        _LOGGER.warning("Meural: Failed to refresh token: %s", err)
-        raise InvalidAuth from err
-
-    raise InvalidAuth
 
 class PyMeural:
     """Client for Meural cloud API."""
 
     def __init__(
         self,
-        username: str,
-        password: str,
         token: str | None,
-        token_update_callback: Callable[[str, str], None],
+        token_update_callback: Callable[[str, str, float, str], None],
         session: aiohttp.ClientSession,
         refresh_token: str | None = None,
+        expires_at: float | None = None,
+        trust_id: str | None = None,
     ) -> None:
         """Initialize PyMeural client."""
-        self.username = username
-        self.password = password
         self.session = session
         self.token = token
         self.refresh_token = refresh_token
+        self.expires_at = expires_at
+        self.trust_id = trust_id
         self.token_update_callback = token_update_callback
         self._auth_lock = asyncio.Lock()
 
-    async def request(self, method: str, path: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
-        fetched_new_token = self.token is None
-        if self.token is None:
-            await self.get_new_token()
+    async def request(
+        self, method: str, path: str, data: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         url = f"{BASE_URL}{path}"
         kwargs = {}
         if data:
@@ -107,32 +77,46 @@ class PyMeural:
                 kwargs["params"] = data
             else:
                 kwargs["json"] = data
-        with async_timeout.timeout(10):
-            try:
-                resp = await self.session.request(
-                    method,
-                    url,
-                    headers={
-                        "Authorization": f"Token {self.token}",
-                        "x-meural-api-version": "3",
-                    },
-                    raise_for_status=True,
-                    **kwargs,
-                )
-            except ClientResponseError as err:
-                if err.status != 401:
+        if self.token and self.expires_at and self.expires_at <= time.time() + 60:
+            self.token = None
+
+        for attempt in range(2):
+            if self.token is None:
+                await self.get_new_token()
+
+            async with asyncio.timeout(10):
+                try:
+                    resp = await self.session.request(
+                        method,
+                        url,
+                        headers={
+                            "Authorization": f"Token {self.token}",
+                            "Accept": "application/json",
+                            "x-meural-api-version": "4",
+                            "x-meural-source-platform": "web",
+                        },
+                        raise_for_status=True,
+                        **kwargs,
+                    )
+                    response = await resp.json(content_type=None)
+                    return response.get("data", response)
+                except ClientResponseError as err:
+                    if err.status != 401:
+                        raise
+                    self.token = None
+                    self.expires_at = None
+                    if attempt == 1:
+                        raise InvalidAuth(
+                            "Meural rejected a newly refreshed access token"
+                        ) from err
+                    _LOGGER.info(
+                        "Meural: Cloud request returned 401; refreshing session once"
+                    )
+                except Exception as err:
+                    _LOGGER.error("Meural: Cloud request failed: %s", err)
                     raise
-                # If a new token was just fetched and it fails again, just raise
-                if fetched_new_token:
-                    raise
-                _LOGGER.info('Meural: Sending Request failed. Re-Authenticating')
-                self.token = None
-                return await self.request(method, path, data)
-            except Exception as err:
-                _LOGGER.error('Meural: Sending Request failed. Raising: %s', err)
-                raise
-        response = await resp.json()
-        return response["data"]
+
+        raise InvalidAuth("Unable to obtain a valid Meural access token")
 
     async def get_new_token(self) -> None:
         """Fetch and store a new authentication token."""
@@ -141,24 +125,24 @@ class PyMeural:
             if self.token is not None:
                 return
 
-            # Try to refresh using refresh token first
-            if self.refresh_token:
-                try:
-                    _LOGGER.debug("Meural: Attempting to refresh access token")
-                    self.token = await refresh_access_token(self.session, self.refresh_token)
-                    # Update only access token, keep existing refresh token
-                    self.token_update_callback(self.token, self.refresh_token)
-                    return
-                except InvalidAuth:
-                    _LOGGER.info("Meural: Refresh token invalid, performing full authentication")
-                    # Refresh token is invalid, fall through to full authentication
+            if not self.refresh_token:
+                raise InvalidAuth("No Meural refresh token is available")
 
-            # Full authentication with username and password
-            _LOGGER.info("Meural: Performing full authentication")
-            self.token, self.refresh_token = await authenticate(
-                self.session, self.username, self.password
+            result = await refresh_access_token(
+                self.session,
+                self.refresh_token,
+                self.trust_id,
             )
-            self.token_update_callback(self.token, self.refresh_token)
+            self.token = result.access_token
+            self.refresh_token = result.refresh_token
+            self.expires_at = result.expires_at
+            self.trust_id = result.trust_id
+            self.token_update_callback(
+                result.access_token,
+                result.refresh_token,
+                result.expires_at,
+                result.trust_id,
+            )
 
     async def get_user(self) -> dict[str, Any]:
         """Get user information."""
@@ -180,11 +164,15 @@ class PyMeural:
         """Get user feedback."""
         return await self.request("get", "user/feedback")
 
-    async def device_load_gallery(self, device_id: str | int, gallery_id: str | int) -> dict[str, Any]:
+    async def device_load_gallery(
+        self, device_id: str | int, gallery_id: str | int
+    ) -> dict[str, Any]:
         """Load a gallery on a device."""
         return await self.request("post", f"devices/{device_id}/galleries/{gallery_id}")
 
-    async def device_load_item(self, device_id: str | int, item_id: str | int) -> dict[str, Any]:
+    async def device_load_item(
+        self, device_id: str | int, item_id: str | int
+    ) -> dict[str, Any]:
         """Load an item on a device."""
         return await self.request("post", f"devices/{device_id}/items/{item_id}")
 
@@ -194,9 +182,13 @@ class PyMeural:
 
     async def get_device_galleries(self, device_id: str | int) -> list[dict[str, Any]]:
         """Get device galleries."""
-        return await self.request("get", f"devices/{device_id}/galleries", {"count": 1000})
+        return await self.request(
+            "get", f"devices/{device_id}/galleries", {"count": 1000}
+        )
 
-    async def update_device(self, device_id: str | int, data: dict[str, Any]) -> dict[str, Any]:
+    async def update_device(
+        self, device_id: str | int, data: dict[str, Any]
+    ) -> dict[str, Any]:
         """Update device settings."""
         return await self.request("put", f"devices/{device_id}", data)
 
@@ -208,6 +200,7 @@ class PyMeural:
         """Get item information."""
         return await self.request("get", f"items/{item_id}")
 
+
 class LocalMeural:
     """Client for Meural local device API."""
 
@@ -217,7 +210,9 @@ class LocalMeural:
         self.device = device
         self.session = session
 
-    async def request(self, method: str, path: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def request(
+        self, method: str, path: str, data: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         url = f"http://{self.ip}/remote/{path}"
         kwargs = {}
         if data:
@@ -226,7 +221,7 @@ class LocalMeural:
             else:
                 kwargs["data"] = data
         try:
-            with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 resp = await self.session.request(
                     method,
                     url,
@@ -314,38 +309,46 @@ class LocalMeural:
         """Get current gallery status."""
         return await self.request("get", "get_gallery_status_json/")
 
-    async def send_get_items_by_gallery(self, gallery_id: str | int) -> list[dict[str, Any]]:
+    async def send_get_items_by_gallery(
+        self, gallery_id: str | int
+    ) -> list[dict[str, Any]]:
         """Get items in a gallery."""
-        return await self.request("get", f"get_frame_items_by_gallery_json/{gallery_id}")
+        return await self.request(
+            "get", f"get_frame_items_by_gallery_json/{gallery_id}"
+        )
 
-    async def send_postcard(self, url: str, content_type: str) -> aiohttp.ClientResponse:
+    async def send_postcard(
+        self, url: str, content_type: str
+    ) -> aiohttp.ClientResponse:
         # photo uploads are done doing a multipart/form-data form
         # with key 'photo' and value being the image data
 
         # FIXME: meural accepts image/jpeg but not image/jpg
-        if content_type == 'image/jpg':
-            content_type = 'image/jpeg'
+        if content_type == "image/jpg":
+            content_type = "image/jpeg"
 
         _LOGGER.info(
             "Meural device %s: Sending postcard. URL is %s",
-            self.device['alias'],
+            self.device["alias"],
             url,
         )
-        with async_timeout.timeout(10):
+        async with asyncio.timeout(10):
             response = await self.session.get(url)
             image = await response.read()
         _LOGGER.info(
             "Meural device %s: Sending postcard. Downloaded %d bytes of image",
-            self.device['alias'],
+            self.device["alias"],
             len(image),
         )
 
         data = aiohttp.FormData()
-        data.add_field('photo', image, content_type=content_type)
-        response = await self.session.post(f"http://{self.ip}/remote/postcard", data=data)
+        data.add_field("photo", image, content_type=content_type)
+        response = await self.session.post(
+            f"http://{self.ip}/remote/postcard", data=data
+        )
         _LOGGER.info(
             "Meural device %s: Sending postcard. Response: %s",
-            self.device['alias'],
+            self.device["alias"],
             response,
         )
         text = await response.text()
@@ -353,25 +356,19 @@ class LocalMeural:
         r = json.loads(text)
         _LOGGER.info(
             "Meural device %s: Sending postcard. Image uploaded, status: %s, response: %s",
-            self.device['alias'],
-            r['status'],
-            r['response'],
+            self.device["alias"],
+            r["status"],
+            r["response"],
         )
-        if r['status'] != 'pass':
+        if r["status"] != "pass":
             _LOGGER.error(
                 "Meural device %s: Sending postcard. Could not upload, response: %s",
-                self.device['alias'],
-                r['response'],
+                self.device["alias"],
+                r["response"],
             )
 
         return response
 
-class CannotConnect(HomeAssistantError):
-    """Error to indicate we cannot connect."""
-
-
-class InvalidAuth(HomeAssistantError):
-    """Error to indicate there is invalid auth."""
 
 class DeviceTurnedOff(HomeAssistantError):
     """Error to indicate device turned off or not connected to the network."""

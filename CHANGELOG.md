@@ -5,6 +5,18 @@ All notable changes to the ha-meural Home Assistant integration will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0-beta.1] - 2026-07-15
+
+### Fixed
+- Replaced the legacy direct Cognito token flow with the current NETGEAR Accounts flow: Cognito `CUSTOM_AUTH`, optional OTP/MFA challenge handling, OAuth token exchange, and Meural token refresh through `accounts2.netgear.com`.
+- Stopped background password logins after a token failure, preventing repeated OTP messages and AWS WAF retry storms.
+- Added a complete Home Assistant reauthentication flow for expired legacy sessions.
+
+### Changed
+- Cloud requests now use the Meural v1 API and current web-client headers.
+- Account passwords are no longer stored in Home Assistant after successful authentication.
+- Removed the `boto3` dependency; Cognito calls now use Home Assistant's shared async HTTP session.
+
 ## [2.3.0] - 2026-05-19
 
 ### Fixed

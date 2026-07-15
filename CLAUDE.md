@@ -51,10 +51,16 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 ### Core Components
 
 **PyMeural** (`pymeural.py`):
-- Cloud API client for Meural's REST API (https://api.meural.com/v0/)
-- Uses AWS Cognito (boto3) for authentication with automatic token refresh
+- Cloud API client for Meural's REST API (https://api.meural.com/v1/)
+- Uses the current NETGEAR Accounts flow (Cognito `CUSTOM_AUTH`, OAuth token exchange, and NETGEAR refresh endpoint)
 - Handles authentication token lifecycle with callback for persistent storage
 - All API methods are async and use aiohttp
+
+**NetgearAuthenticator** (`netgear_auth.py`):
+- Handles password and OTP/MFA Cognito challenges interactively through the config flow
+- Exchanges the Cognito access token for Meural access, ID, and refresh tokens
+- Refreshes Meural access tokens through NETGEAR Accounts without repeating password login
+- Reuses a persistent trust identifier and never stores the account password
 
 **LocalMeural** (`pymeural.py`):
 - Local device API client for Canvas web server (http://DEVICE-IP/remote/)
@@ -92,10 +98,12 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 ### Authentication Flow
 
 1. User provides email/password via config flow
-2. PyMeural authenticates with AWS Cognito, receives access + refresh tokens
-3. Tokens stored in config entry via `token_update_callback`
-4. Access token automatically refreshed when expired
-5. If refresh token fails, triggers Home Assistant reauth flow
+2. NetgearAuthenticator starts Cognito `CUSTOM_AUTH` and answers the password challenge
+3. If NETGEAR requires OTP/MFA, the config flow asks for the verification code
+4. The Cognito token is exchanged through NETGEAR Accounts for Meural OAuth tokens
+5. Meural tokens (but not the password) are stored in the config entry
+6. Access tokens are refreshed through NETGEAR Accounts
+7. If the Meural refresh token fails, Home Assistant triggers the reauth flow
 
 ### Data Flow
 
@@ -123,7 +131,6 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 
 ## Dependencies
 
-- **boto3==1.38.15**: AWS SDK for Cognito authentication
 - **aiohttp**: Async HTTP client (provided by Home Assistant)
 - Home Assistant 2024.1.0+ (DataUpdateCoordinator pattern)
 - Python 3.11+
@@ -144,7 +151,7 @@ All services are fully documented in `services.yaml`.
 
 ## Important Notes
 
-- No two-factor authentication support (standard login only)
+- NETGEAR email, SMS, authenticator, and custom challenges are supported through the config flow
 - SD card folders (meural1-4) supported but with limited metadata
 - Uses both cloud polling and local device communication
 - Local IP discovery happens via cloud API (device must be online to initial setup)

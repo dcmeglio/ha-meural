@@ -27,7 +27,7 @@ After restarting go to *Settings*, *Devices & Services*, *Integrations*, and cli
 
 Log in with your NETGEAR account.  
 
-**Note 1:** This integration does not yet support NETGEAR's two-step verification method of logging in. Please use the standard login and password method to use this integration.  
+If NETGEAR sends a one-time verification code by email, SMS, or an authenticator app, enter it in the second setup screen. Your password is used only for this interactive sign-in and is not stored in Home Assistant.
 
 **Note 2:** If you are upgrading to v2.0.0 from v1.x, the upgrade is fully backward compatible — no re-configuration or re-authentication is needed. Home Assistant will handle the migration automatically on restart. However, if you are upgrading from v0.x, you have to delete this integration in *Settings*, *Devices & Services*, *Integrations*, and then re-add it to log in again. This will set up the configuration entries required by v1.0.0 and later.  
 
