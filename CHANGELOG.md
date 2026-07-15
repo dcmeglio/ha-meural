@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Cloud requests now use the Meural v1 API and current web-client headers.
-- Account passwords are no longer stored in Home Assistant after successful authentication.
+- Background token refresh no longer repeats the password login.
 - Removed the `boto3` dependency; Cognito calls now use Home Assistant's shared async HTTP session.
 
 ## [2.3.0] - 2026-05-19

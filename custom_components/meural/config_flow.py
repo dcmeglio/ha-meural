@@ -37,6 +37,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._authenticator: netgear_auth.NetgearAuthenticator | None = None
         self._pending_challenge: netgear_auth.PendingChallenge | None = None
         self._email: str | None = None
+        self._password: str | None = None
 
     async def async_step_user(
         self,
@@ -139,6 +140,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str],
     ) -> FlowResult | None:
         """Start login and route to a challenge form when Netgear requires it."""
+        self._password = password
         self._authenticator = netgear_auth.NetgearAuthenticator(
             async_get_clientsession(self.hass)
         )
@@ -166,10 +168,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self,
         result: netgear_auth.AuthResult,
     ) -> FlowResult:
-        """Create or update the config entry with password-free Meural tokens."""
+        """Create or update the config entry with Meural OAuth tokens."""
         assert self._email is not None
+        assert self._password is not None
         data = {
             CONF_EMAIL: self._email,
+            CONF_PASSWORD: self._password,
             "token": result.access_token,
             "refresh_token": result.refresh_token,
             "expires_at": result.expires_at,

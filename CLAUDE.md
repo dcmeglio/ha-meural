@@ -60,7 +60,7 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 - Handles password and OTP/MFA Cognito challenges interactively through the config flow
 - Exchanges the Cognito access token for Meural access, ID, and refresh tokens
 - Refreshes Meural access tokens through NETGEAR Accounts without repeating password login
-- Reuses a persistent trust identifier and never stores the account password
+- Reuses a persistent trust identifier and never uses the stored password for background refresh
 
 **LocalMeural** (`pymeural.py`):
 - Local device API client for Canvas web server (http://DEVICE-IP/remote/)
@@ -101,7 +101,7 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 2. NetgearAuthenticator starts Cognito `CUSTOM_AUTH` and answers the password challenge
 3. If NETGEAR requires OTP/MFA, the config flow asks for the verification code
 4. The Cognito token is exchanged through NETGEAR Accounts for Meural OAuth tokens
-5. Meural tokens (but not the password) are stored in the config entry
+5. Meural tokens are stored in the config entry; the password remains only for v2.3.x rollback compatibility
 6. Access tokens are refreshed through NETGEAR Accounts
 7. If the Meural refresh token fails, Home Assistant triggers the reauth flow
 

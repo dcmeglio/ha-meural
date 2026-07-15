@@ -38,15 +38,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         expires_at: float,
         trust_id: str,
     ) -> None:
-        """Persist rotated Meural OAuth tokens without retaining a password."""
+        """Persist rotated Meural OAuth tokens."""
         _LOGGER.debug("Tokens updated. Saving to config entry.")
-        entry_data = {
-            key: value for key, value in entry.data.items() if key != "password"
-        }
         hass.config_entries.async_update_entry(
             entry,
             data={
-                **entry_data,
+                **entry.data,
                 "token": token,
                 "refresh_token": refresh_token,
                 "expires_at": expires_at,

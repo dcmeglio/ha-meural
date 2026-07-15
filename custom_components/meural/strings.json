@@ -9,7 +9,7 @@
         }
       },
       "reauth_confirm": {
-        "description": "Sign in again for {email}. Your password is only used during this sign-in and is not stored.",
+        "description": "Sign in again for {email}.",
         "data": {
           "password": "[%key:common::config_flow::data::password%]"
         }
