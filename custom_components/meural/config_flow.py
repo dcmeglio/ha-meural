@@ -20,7 +20,6 @@ from .mobile_auth import create_mobile_auth_url
 _LOGGER = logging.getLogger(__name__)
 
 CONF_EMAIL = "email"
-CONF_LOGIN_PROXY = "login_proxy"
 CONF_VERIFICATION_CODE = "verification_code"
 CONF_COGNITO_ACCESS_TOKEN = "cognito_access_token"
 CONF_TRUST_ID = "trust_id"
@@ -31,15 +30,9 @@ DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_EMAIL): str,
         vol.Required(CONF_PASSWORD): str,
-        vol.Optional(CONF_LOGIN_PROXY, default=""): str,
     }
 )
-REAUTH_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_PASSWORD): str,
-        vol.Optional(CONF_LOGIN_PROXY, default=""): str,
-    }
-)
+REAUTH_SCHEMA = vol.Schema({vol.Required(CONF_PASSWORD): str})
 CHALLENGE_SCHEMA = vol.Schema({vol.Required(CONF_VERIFICATION_CODE): str})
 
 
@@ -71,7 +64,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
-        """Handle the direct password or temporary proxy sign-in."""
+        """Handle the normal direct NETGEAR password sign-in."""
         errors: dict[str, str] = {}
         if user_input is not None:
             if CONF_EMAIL in user_input:
@@ -83,7 +76,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._email,
                 user_input[CONF_PASSWORD],
                 errors,
-                user_input.get(CONF_LOGIN_PROXY),
             )
             if result is not None:
                 return result
@@ -238,14 +230,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         email: str,
         password: str,
         errors: dict[str, str],
-        proxy_url: str | None = None,
     ) -> FlowResult | None:
         """Start login and route to a challenge form when Netgear requires it."""
         self._password = password
         try:
             self._authenticator = netgear_auth.NetgearAuthenticator(
                 async_get_clientsession(self.hass),
-                proxy_url=proxy_url,
             )
             result = await self._authenticator.authenticate(email, password)
             return await self._finish_authentication(result)
@@ -255,8 +245,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except netgear_auth.AuthenticationBlocked:
             _LOGGER.warning("Netgear WAF blocked Meural authentication")
             errors["base"] = "auth_blocked"
-        except netgear_auth.InvalidProxy:
-            errors["base"] = "invalid_proxy"
         except netgear_auth.CannotConnect:
             _LOGGER.warning("Cannot connect to Netgear authentication services")
             errors["base"] = "cannot_connect"

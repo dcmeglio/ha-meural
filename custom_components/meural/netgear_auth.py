@@ -11,7 +11,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode
 
 import aiohttp
 
@@ -47,35 +47,6 @@ class InvalidChallenge(InvalidAuth):
 
 class AuthenticationBlocked(MeuralAuthError):
     """AWS WAF blocked the Cognito authentication request."""
-
-
-class InvalidProxy(MeuralAuthError):
-    """The temporary login proxy URL is invalid."""
-
-
-def normalize_http_proxy(proxy_url: str | None) -> str | None:
-    """Validate and normalize an optional HTTP CONNECT proxy URL."""
-    if proxy_url is None or not proxy_url.strip():
-        return None
-
-    normalized = proxy_url.strip()
-    parsed = urlsplit(normalized)
-    try:
-        port = parsed.port
-    except ValueError as err:
-        raise InvalidProxy("The proxy port is invalid") from err
-
-    if (
-        parsed.scheme.lower() != "http"
-        or not parsed.hostname
-        or (parsed.path not in ("", "/"))
-        or parsed.query
-        or parsed.fragment
-        or (port is not None and not 1 <= port <= 65535)
-    ):
-        raise InvalidProxy("Use an HTTP proxy URL such as http://host:8080")
-
-    return normalized
 
 
 @dataclass(frozen=True)
@@ -125,11 +96,9 @@ class NetgearAuthenticator:
         self,
         session: aiohttp.ClientSession,
         trust_id: str | None = None,
-        proxy_url: str | None = None,
     ) -> None:
         self.session = session
         self.trust_id = trust_id or str(uuid.uuid4())
-        self.proxy_url = normalize_http_proxy(proxy_url)
 
     async def authenticate(self, username: str, password: str) -> AuthResult:
         """Start the current Netgear login flow."""
@@ -349,19 +318,13 @@ class NetgearAuthenticator:
         headers: dict[str, str] | None = None,
         json_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        request_kwargs: dict[str, Any] = {
-            "headers": headers,
-            "json": json_data,
-        }
-        if self.proxy_url is not None:
-            request_kwargs["proxy"] = self.proxy_url
-
         try:
             async with asyncio.timeout(15):
                 async with self.session.request(
                     method,
                     url,
-                    **request_kwargs,
+                    headers=headers,
+                    json=json_data,
                 ) as response:
                     try:
                         body = await response.json(content_type=None)

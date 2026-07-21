@@ -5,6 +5,14 @@ All notable changes to the ha-meural Home Assistant integration will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0-beta.4] - 2026-07-21
+
+### Changed
+- Simplified setup and reauthentication to two choices: normal sign-in from Home Assistant for connections without an IP block, and browser-assisted mobile sign-in for NETGEAR WAF/IP blocks.
+
+### Removed
+- Removed the temporary HTTP CONNECT proxy option and all supporting proxy code, validation, tests, and active documentation.
+
 ## [2.4.0-beta.3] - 2026-07-21
 
 ### Added

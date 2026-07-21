@@ -25,34 +25,23 @@ Restart Home Assistant after copying.
 ### Setup
 After restarting go to *Settings*, *Devices & Services*, *Integrations*, and click *+ Add Integration* in the bottom right to add a new integration and find the Meural integration to set up.  
 
-Choose a NETGEAR sign-in method. The mobile-data method is recommended when NETGEAR has blocked the public IP address used by Home Assistant. Direct password sign-in and a temporary HTTP proxy remain available as alternatives.
+Choose a NETGEAR sign-in method:
 
-If NETGEAR sends a one-time verification code by email, SMS, or an authenticator app, enter it in the second setup screen. Background token refresh uses the resulting Meural refresh token and does not repeat the password login.
+- **Sign in normally from Home Assistant** when the Home Assistant connection is not blocked by NETGEAR.
+- **Sign in on a phone to bypass a WAF/IP block** when interactive login requests from the Home Assistant public IP are blocked.
 
-#### Temporary workaround for a NETGEAR WAF/IP block
+If NETGEAR sends a one-time verification code by email, SMS, or an authenticator app, enter it in the Home Assistant challenge screen for a normal login or in the phone browser for a mobile login. Background token refresh uses the resulting Meural refresh token and does not repeat the password login.
 
-Version `2.4.0-beta.3` offers a browser-assisted mobile sign-in:
+#### Mobile workaround for a NETGEAR WAF/IP block
+
+Version `2.4.0-beta.4` offers a browser-assisted mobile sign-in:
 
 1. Open Home Assistant through the external HTTPS address that also works on your phone.
-2. Start Meural setup or reauthentication and choose **Sign in on a phone using mobile data**.
+2. Start Meural setup or reauthentication and choose **Sign in on a phone to bypass a WAF/IP block**.
 3. Open the one-time link on the phone and turn off Wi-Fi before entering the NETGEAR account details.
 4. Complete any NETGEAR verification challenge on the phone, then return to Home Assistant.
 
-The one-time link expires after 10 minutes and can submit a result only once. The account password and verification code are sent directly from the phone browser to NETGEAR Cognito; they are not sent back to or stored by Home Assistant. Home Assistant receives the short-lived Cognito result and completes the Meural token exchange. This requires Home Assistant to be reachable through an external HTTPS address. If the final NETGEAR token exchange is also blocked from the home IP, use the temporary proxy option below.
-
-The alternative proxy method routes only the interactive NETGEAR sign-in through a temporary HTTP CONNECT proxy. The proxy is not saved, so normal Meural API requests and background token refresh continue directly from Home Assistant after login.
-
-One temporary setup is a Mac on the same LAN as Home Assistant with a VPN connection:
-
-1. Make sure the VPN permits access to local-network devices.
-2. Install [GOST](https://gost.run/) with `brew install gost`.
-3. Find the Mac's LAN IP address in **System Settings → Network**.
-4. Generate a temporary proxy password with `openssl rand -hex 16`.
-5. While the VPN is connected, start the proxy with `gost -L http://meural:TEMPORARY_PASSWORD@:8080`.
-6. Start or retry Meural reauthentication in Home Assistant. Enter the normal NETGEAR password and set **Temporary login proxy** to `http://meural:TEMPORARY_PASSWORD@MAC_LAN_IP:8080`.
-7. Complete any one-time verification challenge. After Home Assistant reports a successful login, stop GOST with **Ctrl+C** and disconnect the VPN if desired.
-
-The NETGEAR password and verification response remain protected by end-to-end TLS through the CONNECT tunnel. The random proxy password protects the temporary LAN proxy itself. Do not expose port 8080 through the router, and stop the proxy immediately after authentication. If background refresh later fails from the blocked IP, keep the integration disabled rather than repeating password login attempts.
+The one-time link expires after 10 minutes and can submit a result only once. The account password and verification code are sent directly from the phone browser to NETGEAR Cognito; they are not sent back to or stored by Home Assistant. Home Assistant receives the short-lived Cognito result and completes the Meural token exchange. This requires Home Assistant to be reachable through an external HTTPS address. If NETGEAR also blocks the final token exchange from the home IP, stop retrying and wait for NETGEAR support to remove the block.
 
 **Note 2:** If you are upgrading to v2.0.0 from v1.x, the upgrade is fully backward compatible — no re-configuration or re-authentication is needed. Home Assistant will handle the migration automatically on restart. However, if you are upgrading from v0.x, you have to delete this integration in *Settings*, *Devices & Services*, *Integrations*, and then re-add it to log in again. This will set up the configuration entries required by v1.0.0 and later.  
 
