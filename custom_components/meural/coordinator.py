@@ -27,6 +27,24 @@ from .pymeural import DeviceTurnedOff, LocalMeural, PyMeural
 _LOGGER = logging.getLogger(__name__)
 
 
+def _normalize_backlight(value: Any) -> int | None:
+    """Normalize a Canvas backlight response to a percentage."""
+    if isinstance(value, dict):
+        for key in ("backlight", "brightness", "value"):
+            if key in value:
+                value = value[key]
+                break
+        else:
+            return None
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        level = round(float(str(value).rstrip("%")))
+    except (TypeError, ValueError):
+        return None
+    return max(0, min(100, level))
+
+
 class CloudDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Class to manage fetching Meural cloud API data."""
 
@@ -215,6 +233,23 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.cloud_coordinator.notify_sleep_state_changed()
         self.async_update_listeners()
 
+    async def _async_get_backlight(
+        self, system_value: Any, fallback: Any = None
+    ) -> int | None:
+        """Get brightness from system data or the dedicated local endpoint."""
+        backlight = _normalize_backlight(system_value)
+        if backlight is not None:
+            return backlight
+
+        try:
+            backlight = _normalize_backlight(
+                await self.local_meural.send_get_backlight()
+            )
+        except (DeviceTurnedOff, aiohttp.ClientError, asyncio.TimeoutError):
+            backlight = None
+
+        return backlight if backlight is not None else _normalize_backlight(fallback)
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from Meural local device API."""
         try:
@@ -231,6 +266,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 gsensor = cached.get("gsensor")
                 lux = cached.get("lux")
                 backlight = cached.get("backlight")
+                system_backlight = None
                 free_space = cached.get("free_space")
                 wifi_signal = cached.get("wifi_signal")
                 version = cached.get("version")
@@ -238,13 +274,14 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     system_info = await self.local_meural.send_get_system()
                     gsensor = system_info.get("gsensor")
                     lux = system_info.get("lux")
-                    backlight = system_info.get("backlight")
+                    system_backlight = system_info.get("backlight")
                     free_space = system_info.get("free_space")
                     wifi_status = system_info.get("wifi_status", {})
                     wifi_signal = wifi_status.get("signal")
                     version = system_info.get("version")
                 except (aiohttp.ClientError, asyncio.TimeoutError):
                     pass  # Fall back to cached values initialized above
+                backlight = await self._async_get_backlight(system_backlight, backlight)
                 return {
                     "sleeping": True,
                     "galleries": cached.get("galleries", []),
@@ -265,7 +302,8 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Failure here is non-critical; omit the keys so callers can detect absence.
             gsensor = None
             lux = None
-            backlight = None
+            cached_backlight = (self.data or {}).get("backlight")
+            system_backlight = None
             free_space = None
             wifi_signal = None
             version = None
@@ -273,13 +311,17 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 system_info = await self.local_meural.send_get_system()
                 gsensor = system_info.get("gsensor")
                 lux = system_info.get("lux")
-                backlight = system_info.get("backlight")
+                system_backlight = system_info.get("backlight")
                 free_space = system_info.get("free_space")
                 wifi_status = system_info.get("wifi_status", {})
                 wifi_signal = wifi_status.get("signal")
                 version = system_info.get("version")
             except (aiohttp.ClientError, asyncio.TimeoutError):
                 pass
+
+            backlight = await self._async_get_backlight(
+                system_backlight, cached_backlight
+            )
 
             return {
                 "sleeping": False,

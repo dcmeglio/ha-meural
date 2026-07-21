@@ -34,7 +34,7 @@ If NETGEAR sends a one-time verification code by email, SMS, or an authenticator
 
 #### Mobile workaround for a NETGEAR WAF/IP block
 
-Version `2.4.0-beta.4` offers a browser-assisted mobile sign-in:
+Version `2.4.0-beta.5` offers a browser-assisted mobile sign-in:
 
 1. Open Home Assistant through the external HTTPS address that also works on your phone.
 2. Start Meural setup or reauthentication and choose **Sign in on a phone to bypass a WAF/IP block**.
@@ -77,6 +77,11 @@ A **Light** entity is created for each Canvas to control the backlight brightnes
 - **Brightness**: Sets the backlight level from 0–100%. Note that setting brightness via the `meural.set_brightness` service or the media player card simultaneously keeps both entities in sync.
 
 The backlight entity stays in sync with the media player entity — both reflect the same sleep/wake state.
+
+Open the light entity's detail dialog to use its brightness slider. Some Home Assistant dashboard rows show only the on/off button until the entity is opened; a Tile card with the brightness feature can keep the slider visible on a dashboard.
+
+### Automatic Brightness
+An **Auto Brightness** switch is created for each Canvas that reports support for the ambient light setting. Turning it on enables Meural's own ambient-light adjustment (`alsEnabled`); turning it off returns brightness control to the backlight slider. The switch uses the Meural cloud setting and replaces the need to call `meural.set_device_option` manually for this option.
 
 ### Sensors
 Four sensor entities are created for each Canvas:
