@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-from dataclasses import dataclass
 import json
 import logging
 import time
+import uuid
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode, urlsplit
-import uuid
 
 import aiohttp
 
@@ -206,6 +206,10 @@ class NetgearAuthenticator:
 
         return self._parse_meural_tokens(response, refresh_token)
 
+    async def exchange_cognito_token(self, cognito_access_token: str) -> AuthResult:
+        """Exchange a short-lived Cognito token obtained by a trusted browser."""
+        return await self._exchange_cognito_token(cognito_access_token)
+
     async def _finish_cognito_auth(
         self,
         response: dict[str, Any],
@@ -280,6 +284,10 @@ class NetgearAuthenticator:
                 },
             )
         except _HttpError as err:
+            if self._is_waf_error(err):
+                raise AuthenticationBlocked(
+                    "Netgear blocked the Meural token exchange"
+                ) from err
             if err.status == 429 or err.status >= 500:
                 raise CannotConnect(
                     "Netgear Accounts is temporarily unavailable"

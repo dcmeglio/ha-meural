@@ -4,7 +4,9 @@
             "already_configured": "Device is already configured",
             "reauth_successful": "Reauthentication was successful",
             "challenge_expired": "The verification session expired. Start signing in again.",
-            "wrong_account": "The account does not match the account that needs reauthentication."
+            "wrong_account": "The account does not match the account that needs reauthentication.",
+            "external_url_unavailable": "Home Assistant could not determine the external address used by this browser. Open Home Assistant through its external HTTPS address and try again.",
+            "mobile_login_expired": "The mobile sign-in result expired. Start the sign-in again."
         },
         "error": {
             "cannot_connect": "Failed to connect",
@@ -16,6 +18,20 @@
         },
         "step": {
             "user": {
+                "description": "Choose how to sign in to your NETGEAR account.",
+                "menu_options": {
+                    "mobile_login": "Sign in on a phone using mobile data",
+                    "password_login": "Sign in directly or with a temporary proxy"
+                }
+            },
+            "reauth_method": {
+                "description": "Sign in again for {email}. Choose how to connect to NETGEAR.",
+                "menu_options": {
+                    "mobile_login": "Sign in on a phone using mobile data",
+                    "password_login": "Sign in directly or with a temporary proxy"
+                }
+            },
+            "password_login": {
                 "description": "Sign in with your NETGEAR account. NETGEAR may send a one-time verification code.",
                 "data": {
                     "password": "Password",
@@ -25,6 +41,12 @@
                 "data_description": {
                     "login_proxy": "HTTP proxy used only for this sign-in, for example http://user:password@192.168.1.10:8080. It is not saved."
                 }
+            },
+            "mobile_login": {
+                "description": "Open the one-time website on a phone, turn off Wi-Fi, and complete the NETGEAR sign-in using mobile data. The link expires after 10 minutes."
+            },
+            "mobile_finish": {
+                "description": "Home Assistant received the mobile sign-in and is completing the Meural token exchange. Submit to retry this final exchange if NETGEAR temporarily rejected it."
             },
             "reauth_confirm": {
                 "description": "Sign in again for {email}.",

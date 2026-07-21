@@ -7,20 +7,25 @@ from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import http
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN
 from . import netgear_auth
+from .const import DOMAIN
+from .mobile_auth import create_mobile_auth_url
 
 _LOGGER = logging.getLogger(__name__)
 
 CONF_EMAIL = "email"
 CONF_LOGIN_PROXY = "login_proxy"
 CONF_VERIFICATION_CODE = "verification_code"
+CONF_COGNITO_ACCESS_TOKEN = "cognito_access_token"
+CONF_TRUST_ID = "trust_id"
+
+HEADER_FRONTEND_BASE = "HA-Frontend-Base"
 
 DATA_SCHEMA = vol.Schema(
     {
@@ -49,15 +54,30 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._pending_challenge: netgear_auth.PendingChallenge | None = None
         self._email: str | None = None
         self._password: str | None = None
+        self._mobile_cognito_access_token: str | None = None
+        self._mobile_trust_id: str | None = None
 
     async def async_step_user(
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
-        """Handle initial account setup."""
+        """Choose a sign-in method for initial account setup."""
+        return self.async_show_menu(
+            step_id="user",
+            menu_options=["mobile_login", "password_login"],
+        )
+
+    async def async_step_password_login(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Handle the direct password or temporary proxy sign-in."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            self._email = user_input[CONF_EMAIL].strip()
+            if CONF_EMAIL in user_input:
+                self._email = user_input[CONF_EMAIL].strip()
+            if self._email is None:
+                return self.async_abort(reason="unknown")
             _LOGGER.debug("Attempting Meural authentication for %s", self._email)
             result = await self._start_authentication(
                 self._email,
@@ -69,8 +89,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return result
 
         return self.async_show_form(
-            step_id="user",
-            data_schema=DATA_SCHEMA,
+            step_id="password_login",
+            data_schema=(
+                REAUTH_SCHEMA
+                if self.source == config_entries.SOURCE_REAUTH
+                else DATA_SCHEMA
+            ),
+            description_placeholders={"email": self._email or ""},
             errors=errors,
         )
 
@@ -80,28 +105,90 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Start reauthentication for an expired legacy or Meural session."""
         self._email = entry_data[CONF_EMAIL]
-        return await self.async_step_reauth_confirm()
+        return await self.async_step_reauth_method()
+
+    async def async_step_reauth_method(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Choose a sign-in method for reauthentication."""
+        return self.async_show_menu(
+            step_id="reauth_method",
+            menu_options=["mobile_login", "password_login"],
+            description_placeholders={"email": self._email or ""},
+        )
 
     async def async_step_reauth_confirm(
         self,
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
-        """Ask for the password only when an interactive login is required."""
-        errors: dict[str, str] = {}
-        if user_input is not None and self._email is not None:
-            result = await self._start_authentication(
-                self._email,
-                user_input[CONF_PASSWORD],
-                errors,
-                user_input.get(CONF_LOGIN_PROXY),
+        """Keep compatibility with reauth flows opened before an upgrade."""
+        return await self.async_step_password_login(user_input)
+
+    async def async_step_mobile_login(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Authenticate Cognito in a phone browser on a different connection."""
+        if user_input is not None:
+            self._email = user_input[CONF_EMAIL].strip()
+            self._mobile_cognito_access_token = user_input[CONF_COGNITO_ACCESS_TOKEN]
+            self._mobile_trust_id = user_input[CONF_TRUST_ID]
+            return self.async_external_step_done(next_step_id="mobile_finish")
+
+        self._password = None
+        request = http.current_request.get()
+        if request is None or not (
+            frontend_base := request.headers.get(HEADER_FRONTEND_BASE)
+        ):
+            return self.async_abort(reason="external_url_unavailable")
+
+        try:
+            auth_url = create_mobile_auth_url(
+                self.hass,
+                self.flow_id,
+                frontend_base,
             )
-            if result is not None:
-                return result
+        except ValueError:
+            return self.async_abort(reason="external_url_unavailable")
+        return self.async_external_step(step_id="mobile_login", url=auth_url)
+
+    async def async_step_mobile_finish(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        """Exchange the browser's short-lived Cognito token for Meural tokens."""
+        if (
+            self._email is None
+            or self._mobile_cognito_access_token is None
+            or self._mobile_trust_id is None
+        ):
+            return self.async_abort(reason="mobile_login_expired")
+
+        errors: dict[str, str] = {}
+        try:
+            authenticator = netgear_auth.NetgearAuthenticator(
+                async_get_clientsession(self.hass),
+                trust_id=self._mobile_trust_id,
+            )
+            result = await authenticator.exchange_cognito_token(
+                self._mobile_cognito_access_token
+            )
+            self._mobile_cognito_access_token = None
+            return await self._finish_authentication(result)
+        except netgear_auth.AuthenticationBlocked:
+            errors["base"] = "auth_blocked"
+        except netgear_auth.CannotConnect:
+            errors["base"] = "cannot_connect"
+        except netgear_auth.InvalidAuth:
+            errors["base"] = "invalid_auth"
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Unexpected exception finishing mobile Meural sign-in")
+            errors["base"] = "unknown"
 
         return self.async_show_form(
-            step_id="reauth_confirm",
-            data_schema=REAUTH_SCHEMA,
-            description_placeholders={"email": self._email or ""},
+            step_id="mobile_finish",
+            data_schema=vol.Schema({}),
             errors=errors,
         )
 
@@ -187,15 +274,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Create or update the config entry with Meural OAuth tokens."""
         assert self._email is not None
-        assert self._password is not None
         data = {
             CONF_EMAIL: self._email,
-            CONF_PASSWORD: self._password,
             "token": result.access_token,
             "refresh_token": result.refresh_token,
             "expires_at": result.expires_at,
             "trust_id": result.trust_id,
         }
+        if self._password is not None:
+            # Retained only for rollback compatibility with v2.3.x.
+            data[CONF_PASSWORD] = self._password
 
         await self.async_set_unique_id(self._email, raise_on_progress=False)
         if self.source == config_entries.SOURCE_REAUTH:

@@ -25,13 +25,22 @@ Restart Home Assistant after copying.
 ### Setup
 After restarting go to *Settings*, *Devices & Services*, *Integrations*, and click *+ Add Integration* in the bottom right to add a new integration and find the Meural integration to set up.  
 
-Log in with your NETGEAR account.  
+Choose a NETGEAR sign-in method. The mobile-data method is recommended when NETGEAR has blocked the public IP address used by Home Assistant. Direct password sign-in and a temporary HTTP proxy remain available as alternatives.
 
 If NETGEAR sends a one-time verification code by email, SMS, or an authenticator app, enter it in the second setup screen. Background token refresh uses the resulting Meural refresh token and does not repeat the password login.
 
 #### Temporary workaround for a NETGEAR WAF/IP block
 
-Version `2.4.0-beta.2` can route only the interactive NETGEAR sign-in through a temporary HTTP CONNECT proxy. The proxy is not saved, so normal Meural API requests and background token refresh continue directly from Home Assistant after login.
+Version `2.4.0-beta.3` offers a browser-assisted mobile sign-in:
+
+1. Open Home Assistant through the external HTTPS address that also works on your phone.
+2. Start Meural setup or reauthentication and choose **Sign in on a phone using mobile data**.
+3. Open the one-time link on the phone and turn off Wi-Fi before entering the NETGEAR account details.
+4. Complete any NETGEAR verification challenge on the phone, then return to Home Assistant.
+
+The one-time link expires after 10 minutes and can submit a result only once. The account password and verification code are sent directly from the phone browser to NETGEAR Cognito; they are not sent back to or stored by Home Assistant. Home Assistant receives the short-lived Cognito result and completes the Meural token exchange. This requires Home Assistant to be reachable through an external HTTPS address. If the final NETGEAR token exchange is also blocked from the home IP, use the temporary proxy option below.
+
+The alternative proxy method routes only the interactive NETGEAR sign-in through a temporary HTTP CONNECT proxy. The proxy is not saved, so normal Meural API requests and background token refresh continue directly from Home Assistant after login.
 
 One temporary setup is a Mac on the same LAN as Home Assistant with a VPN connection:
 

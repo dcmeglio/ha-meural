@@ -5,6 +5,13 @@ All notable changes to the ha-meural Home Assistant integration will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0-beta.3] - 2026-07-21
+
+### Added
+- Added a browser-assisted mobile sign-in option for NETGEAR WAF/IP blocks. Home Assistant provides a one-time link that can be opened on a phone using mobile data, so the Cognito authentication requests originate from the phone instead of the blocked Home Assistant connection.
+- The one-time link expires after 10 minutes and accepts a result only once. The NETGEAR email, password, and verification code stay in the phone browser and are sent directly to Cognito; Home Assistant receives only the short-lived Cognito access token needed for the Meural token exchange.
+- Kept direct password authentication and the temporary HTTP CONNECT proxy as alternative sign-in methods.
+
 ## [2.4.0-beta.2] - 2026-07-21
 
 ### Added

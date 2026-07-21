@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
 import sys
 import unittest
+from pathlib import Path
 from typing import Any
 
 MODULE_PATH = (
@@ -172,6 +172,39 @@ class NetgearAuthenticatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             all(request["proxy"] == proxy_url for request in session.requests)
         )
+
+    async def test_browser_cognito_token_exchange(self) -> None:
+        """A browser-obtained Cognito token can finish on Home Assistant."""
+        session = FakeSession(authorize_success(), meural_token_success())
+        authenticator = auth.NetgearAuthenticator(session, "mobile-trust-id")
+
+        result = await authenticator.exchange_cognito_token(
+            "browser-cognito-access-token"
+        )
+
+        self.assertEqual("meural-access-token", result.access_token)
+        self.assertEqual("meural-refresh-token", result.refresh_token)
+        self.assertEqual("mobile-trust-id", result.trust_id)
+        self.assertEqual(
+            "Bearer browser-cognito-access-token",
+            session.requests[0]["headers"]["Authorization"],
+        )
+        self.assertEqual(2, len(session.requests))
+
+    async def test_browser_token_exchange_reports_waf_block(self) -> None:
+        session = FakeSession(
+            FakeResponse(
+                {
+                    "__type": "ForbiddenException",
+                    "message": "Request not allowed due to WAF block.",
+                },
+                status=403,
+            )
+        )
+        authenticator = auth.NetgearAuthenticator(session, "mobile-trust-id")
+
+        with self.assertRaises(auth.AuthenticationBlocked):
+            await authenticator.exchange_cognito_token("browser-cognito-access-token")
 
     def test_temporary_proxy_validation(self) -> None:
         self.assertIsNone(auth.normalize_http_proxy(""))
