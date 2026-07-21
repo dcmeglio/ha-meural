@@ -1,4 +1,4 @@
-"""Switch platform for Meural integration."""
+"""Number platform for Meural integration."""
 
 from __future__ import annotations
 
@@ -6,8 +6,9 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.components.switch import SwitchEntity
+from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -20,35 +21,39 @@ _LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, kw_only=True)
-class MeuralSwitchDescription:
-    """Describe a Meural cloud-backed switch."""
+class MeuralNumberDescription:
+    """Describe a Meural cloud-backed number setting."""
 
     key: str
     name: str
     unique_suffix: str
     icon: str
-    entity_category: EntityCategory | None = EntityCategory.CONFIG
+    minimum: float
+    maximum: float
+    step: float
+    unit: str
 
 
-SWITCH_DESCRIPTIONS = (
-    MeuralSwitchDescription(
-        key="alsEnabled",
-        name="Auto Brightness",
-        unique_suffix="auto_brightness",
-        icon="mdi:brightness-auto",
-        entity_category=None,
+NUMBER_DESCRIPTIONS = (
+    MeuralNumberDescription(
+        key="alsSensitivity",
+        name="Light Sensitivity",
+        unique_suffix="light_sensitivity",
+        icon="mdi:brightness-6",
+        minimum=0,
+        maximum=100,
+        step=1,
+        unit=PERCENTAGE,
     ),
-    MeuralSwitchDescription(
-        key="orientationMatch",
-        name="Orientation Match",
-        unique_suffix="orientation_match",
-        icon="mdi:crop-rotate",
-    ),
-    MeuralSwitchDescription(
-        key="goesDark",
-        name="Sleep When Dark",
-        unique_suffix="sleep_when_dark",
-        icon="mdi:theme-light-dark",
+    MeuralNumberDescription(
+        key="imageDuration",
+        name="Artwork Duration",
+        unique_suffix="artwork_duration",
+        icon="mdi:timer-outline",
+        minimum=0,
+        maximum=86400,
+        step=1,
+        unit=UnitOfTime.SECONDS,
     ),
 )
 
@@ -58,14 +63,14 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Meural switch entities."""
+    """Set up Meural number entities."""
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
     meural = entry_data["meural"]
     cloud_coordinator: CloudDataUpdateCoordinator = entry_data["cloud_coordinator"]
 
     entities = []
     for device in cloud_coordinator.data["devices"].values():
-        for description in SWITCH_DESCRIPTIONS:
+        for description in NUMBER_DESCRIPTIONS:
             if description.key not in device:
                 _LOGGER.debug(
                     "Meural device %s does not report %s support",
@@ -73,13 +78,8 @@ async def async_setup_entry(
                     description.name,
                 )
                 continue
-            _LOGGER.info(
-                "Adding Meural %s switch for device %s",
-                description.name,
-                device["alias"],
-            )
             entities.append(
-                MeuralSettingSwitch(
+                MeuralSettingNumber(
                     meural,
                     cloud_coordinator,
                     device,
@@ -90,17 +90,20 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MeuralSettingSwitch(CoordinatorEntity[CloudDataUpdateCoordinator], SwitchEntity):
-    """Boolean cloud setting for a Meural Canvas device."""
+class MeuralSettingNumber(CoordinatorEntity[CloudDataUpdateCoordinator], NumberEntity):
+    """Numeric cloud setting for a Meural Canvas device."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_mode = NumberMode.BOX
 
     def __init__(
         self,
         meural: Any,
         coordinator: CloudDataUpdateCoordinator,
         device: dict[str, Any],
-        description: MeuralSwitchDescription,
+        description: MeuralNumberDescription,
     ) -> None:
-        """Initialize the switch."""
+        """Initialize the number entity."""
         super().__init__(coordinator)
         self.meural = meural
         self._device = device
@@ -109,50 +112,43 @@ class MeuralSettingSwitch(CoordinatorEntity[CloudDataUpdateCoordinator], SwitchE
         self._attr_name = f"{device['alias']} {description.name}"
         self._attr_unique_id = f"{device['id']}_{description.unique_suffix}"
         self._attr_icon = description.icon
-        self._attr_entity_category = description.entity_category
+        self._attr_native_min_value = description.minimum
+        self._attr_native_max_value = description.maximum
+        self._attr_native_step = description.step
+        self._attr_native_unit_of_measurement = description.unit
 
     @property
     def device_info(self) -> dict[str, Any]:
         """Return device information to link this entity to the Meural device."""
-        return {
-            "identifiers": {(DOMAIN, self._device["productKey"])},
-        }
+        return {"identifiers": {(DOMAIN, self._device["productKey"])}}
 
     @property
-    def is_on(self) -> bool | None:
-        """Return whether the setting is enabled."""
+    def native_value(self) -> float | None:
+        """Return the current setting value."""
         if not self.coordinator.data:
             return None
         device = self.coordinator.data.get("devices", {}).get(self._device_id)
-        if not device or self._description.key not in device:
+        if not device:
             return None
-        value = device[self._description.key]
-        if isinstance(value, str):
-            return value.lower() in {"1", "true", "on", "yes"}
-        return bool(value)
+        raw = device.get(self._description.key)
+        try:
+            return float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
 
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        """Enable the setting."""
-        await self._async_set_value(True)
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        """Disable the setting."""
-        await self._async_set_value(False)
-
-    async def _async_set_value(self, enabled: bool) -> None:
-        """Update the setting and reflect it immediately in Home Assistant."""
+    async def async_set_native_value(self, value: float) -> None:
+        """Set the numeric Meural setting."""
+        value = round(value)
         _LOGGER.info(
             "Meural device %s: Setting %s to %s",
             self._device["alias"],
             self._description.key,
-            enabled,
+            value,
         )
-        await self.meural.update_device(
-            self._device_id, {self._description.key: enabled}
-        )
+        await self.meural.update_device(self._device_id, {self._description.key: value})
 
         if self.coordinator.data:
             device = self.coordinator.data.get("devices", {}).get(self._device_id)
             if device is not None:
-                device[self._description.key] = enabled
+                device[self._description.key] = value
                 self.coordinator.async_set_updated_data(self.coordinator.data)

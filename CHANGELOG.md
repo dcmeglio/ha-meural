@@ -5,6 +5,18 @@ All notable changes to the ha-meural Home Assistant integration will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0-beta.6] - 2026-07-21
+
+### Added
+- Added a local **Display Orientation** select for portrait and landscape mode.
+- Added **Orientation Match** and **Sleep When Dark** switches for supported Canvases.
+- Added **Light Sensitivity** and **Artwork Duration** number entities.
+- Added **Image Fit Mode** and **Letterbox Color** select entities.
+- Added a **Physical Orientation** sensor based on the Canvas accelerometer.
+
+### Improved
+- Preserved all cached local sensor and orientation values during temporary Canvas connection failures.
+
 ## [2.4.0-beta.5] - 2026-07-21
 
 ### Added

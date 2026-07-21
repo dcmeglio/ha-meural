@@ -16,7 +16,7 @@ from .coordinator import CloudDataUpdateCoordinator, LocalDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player", "sensor", "light", "switch"]
+PLATFORMS = ["media_player", "sensor", "light", "switch", "select", "number"]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 

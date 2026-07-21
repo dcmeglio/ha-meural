@@ -34,7 +34,7 @@ If NETGEAR sends a one-time verification code by email, SMS, or an authenticator
 
 #### Mobile workaround for a NETGEAR WAF/IP block
 
-Version `2.4.0-beta.5` offers a browser-assisted mobile sign-in:
+Version `2.4.0-beta.6` offers a browser-assisted mobile sign-in:
 
 1. Open Home Assistant through the external HTTPS address that also works on your phone.
 2. Start Meural setup or reauthentication and choose **Sign in on a phone to bypass a WAF/IP block**.
@@ -83,10 +83,24 @@ Open the light entity's detail dialog to use its brightness slider. Some Home As
 ### Automatic Brightness
 An **Auto Brightness** switch is created for each Canvas that reports support for the ambient light setting. Turning it on enables Meural's own ambient-light adjustment (`alsEnabled`); turning it off returns brightness control to the backlight slider. The switch uses the Meural cloud setting and replaces the need to call `meural.set_device_option` manually for this option.
 
+### Canvas Settings
+Supported Canvas settings are exposed as native Home Assistant entities instead of requiring `meural.set_device_option` service calls:
+
+- **Display Orientation** select — portrait or landscape, controlled through the local Canvas API.
+- **Orientation Match** switch — only show artwork matching the physical frame orientation.
+- **Sleep When Dark** switch — automatically sleep and wake with the room lighting.
+- **Light Sensitivity** number — ambient light sensor sensitivity from 0–100%.
+- **Artwork Duration** number — seconds between artwork changes; `0` pauses rotation.
+- **Image Fit Mode** select — contain, auto crop, as is, or stretch.
+- **Letterbox Color** select — black, grey, or white background around unfilled artwork.
+
+Cloud-backed setting entities are created only when the Canvas reports support for the corresponding setting.
+
 ### Sensors
-Four sensor entities are created for each Canvas:
+Five sensor entities are created for each Canvas:
 
 - **Ambient Light** — Illuminance in lux from the local device API. Useful for automations that respond to room lighting conditions. Updates every 10 seconds, including while the Canvas is sleeping.
+- **Physical Orientation** — Portrait or landscape orientation reported by the Canvas accelerometer.
 - **Free Space** — Available Canvas storage in megabytes from the local device API. Diagnostic; disabled by default.
 - **WiFi Signal** — WiFi signal strength in dBm from the local device API. Diagnostic; disabled by default.
 - **Last Seen by Cloud** — Timestamp of the last time the device contacted the Meural cloud, from the cloud API. Useful for connectivity monitoring. Diagnostic; disabled by default.

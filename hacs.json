@@ -1,5 +1,5 @@
 {
   "name": "HA-meural",
-  "domains": ["media_player", "light", "sensor", "switch"],
+  "domains": ["media_player", "light", "sensor", "switch", "select", "number"],
   "iot_class": "Cloud Polling"
 }

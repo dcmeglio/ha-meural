@@ -264,6 +264,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # the local web server remains running during sleep mode.
                 cached = self.data or {}
                 gsensor = cached.get("gsensor")
+                orientation = cached.get("orientation")
                 lux = cached.get("lux")
                 backlight = cached.get("backlight")
                 system_backlight = None
@@ -273,6 +274,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 try:
                     system_info = await self.local_meural.send_get_system()
                     gsensor = system_info.get("gsensor")
+                    orientation = system_info.get("orientation")
                     lux = system_info.get("lux")
                     system_backlight = system_info.get("backlight")
                     free_space = system_info.get("free_space")
@@ -287,6 +289,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "galleries": cached.get("galleries", []),
                     "gallery_status": cached.get("gallery_status", {}),
                     "gsensor": gsensor,
+                    "orientation": orientation,
                     "lux": lux,
                     "backlight": backlight,
                     "free_space": free_space,
@@ -301,6 +304,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Get gsensor orientation for orientationMatch detection and lux for illuminance sensor.
             # Failure here is non-critical; omit the keys so callers can detect absence.
             gsensor = None
+            orientation = None
             lux = None
             cached_backlight = (self.data or {}).get("backlight")
             system_backlight = None
@@ -310,6 +314,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             try:
                 system_info = await self.local_meural.send_get_system()
                 gsensor = system_info.get("gsensor")
+                orientation = system_info.get("orientation")
                 lux = system_info.get("lux")
                 system_backlight = system_info.get("backlight")
                 free_space = system_info.get("free_space")
@@ -328,6 +333,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "galleries": sorted(galleries, key=lambda i: i["name"]),
                 "gallery_status": gallery_status,
                 "gsensor": gsensor,
+                "orientation": orientation,
                 "lux": lux,
                 "backlight": backlight,
                 "free_space": free_space,
@@ -355,6 +361,13 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "sleeping": self._sleeping,
                 "galleries": cached.get("galleries", []),
                 "gallery_status": cached.get("gallery_status", {}),
+                "gsensor": cached.get("gsensor"),
+                "orientation": cached.get("orientation"),
+                "lux": cached.get("lux"),
+                "backlight": cached.get("backlight"),
+                "free_space": cached.get("free_space"),
+                "wifi_signal": cached.get("wifi_signal"),
+                "version": cached.get("version"),
             }
         except Exception:
             # Unexpected error
