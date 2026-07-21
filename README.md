@@ -29,6 +29,22 @@ Log in with your NETGEAR account.
 
 If NETGEAR sends a one-time verification code by email, SMS, or an authenticator app, enter it in the second setup screen. Background token refresh uses the resulting Meural refresh token and does not repeat the password login.
 
+#### Temporary workaround for a NETGEAR WAF/IP block
+
+Version `2.4.0-beta.2` can route only the interactive NETGEAR sign-in through a temporary HTTP CONNECT proxy. The proxy is not saved, so normal Meural API requests and background token refresh continue directly from Home Assistant after login.
+
+One temporary setup is a Mac on the same LAN as Home Assistant with a VPN connection:
+
+1. Make sure the VPN permits access to local-network devices.
+2. Install [GOST](https://gost.run/) with `brew install gost`.
+3. Find the Mac's LAN IP address in **System Settings → Network**.
+4. Generate a temporary proxy password with `openssl rand -hex 16`.
+5. While the VPN is connected, start the proxy with `gost -L http://meural:TEMPORARY_PASSWORD@:8080`.
+6. Start or retry Meural reauthentication in Home Assistant. Enter the normal NETGEAR password and set **Temporary login proxy** to `http://meural:TEMPORARY_PASSWORD@MAC_LAN_IP:8080`.
+7. Complete any one-time verification challenge. After Home Assistant reports a successful login, stop GOST with **Ctrl+C** and disconnect the VPN if desired.
+
+The NETGEAR password and verification response remain protected by end-to-end TLS through the CONNECT tunnel. The random proxy password protects the temporary LAN proxy itself. Do not expose port 8080 through the router, and stop the proxy immediately after authentication. If background refresh later fails from the blocked IP, keep the integration disabled rather than repeating password login attempts.
+
 **Note 2:** If you are upgrading to v2.0.0 from v1.x, the upgrade is fully backward compatible — no re-configuration or re-authentication is needed. Home Assistant will handle the migration automatically on restart. However, if you are upgrading from v0.x, you have to delete this integration in *Settings*, *Devices & Services*, *Integrations*, and then re-add it to log in again. This will set up the configuration entries required by v1.0.0 and later.  
 
 ### Media Player

@@ -5,13 +5,21 @@
         "description": "Sign in with your NETGEAR account. NETGEAR may send a one-time verification code.",
         "data": {
           "email": "Email",
-          "password": "[%key:common::config_flow::data::password%]"
+          "password": "[%key:common::config_flow::data::password%]",
+          "login_proxy": "Temporary login proxy (optional)"
+        },
+        "data_description": {
+          "login_proxy": "HTTP proxy used only for this sign-in, for example http://user:password@192.168.1.10:8080. It is not saved."
         }
       },
       "reauth_confirm": {
         "description": "Sign in again for {email}.",
         "data": {
-          "password": "[%key:common::config_flow::data::password%]"
+          "password": "[%key:common::config_flow::data::password%]",
+          "login_proxy": "Temporary login proxy (optional)"
+        },
+        "data_description": {
+          "login_proxy": "HTTP proxy used only for this sign-in, for example http://user:password@192.168.1.10:8080. It is not saved."
         }
       },
       "challenge": {
@@ -26,6 +34,7 @@
       "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
       "invalid_code": "The verification code is invalid or expired",
       "auth_blocked": "NETGEAR temporarily blocked this sign-in. Stop retrying and try again later.",
+      "invalid_proxy": "Enter a valid http:// proxy URL without a path, query, or fragment.",
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {

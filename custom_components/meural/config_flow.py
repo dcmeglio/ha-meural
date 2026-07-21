@@ -19,10 +19,21 @@ from . import netgear_auth
 _LOGGER = logging.getLogger(__name__)
 
 CONF_EMAIL = "email"
+CONF_LOGIN_PROXY = "login_proxy"
 CONF_VERIFICATION_CODE = "verification_code"
 
 DATA_SCHEMA = vol.Schema(
-    {vol.Required(CONF_EMAIL): str, vol.Required(CONF_PASSWORD): str}
+    {
+        vol.Required(CONF_EMAIL): str,
+        vol.Required(CONF_PASSWORD): str,
+        vol.Optional(CONF_LOGIN_PROXY, default=""): str,
+    }
+)
+REAUTH_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_PASSWORD): str,
+        vol.Optional(CONF_LOGIN_PROXY, default=""): str,
+    }
 )
 CHALLENGE_SCHEMA = vol.Schema({vol.Required(CONF_VERIFICATION_CODE): str})
 
@@ -52,6 +63,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._email,
                 user_input[CONF_PASSWORD],
                 errors,
+                user_input.get(CONF_LOGIN_PROXY),
             )
             if result is not None:
                 return result
@@ -81,13 +93,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._email,
                 user_input[CONF_PASSWORD],
                 errors,
+                user_input.get(CONF_LOGIN_PROXY),
             )
             if result is not None:
                 return result
 
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
+            data_schema=REAUTH_SCHEMA,
             description_placeholders={"email": self._email or ""},
             errors=errors,
         )
@@ -138,13 +151,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         email: str,
         password: str,
         errors: dict[str, str],
+        proxy_url: str | None = None,
     ) -> FlowResult | None:
         """Start login and route to a challenge form when Netgear requires it."""
         self._password = password
-        self._authenticator = netgear_auth.NetgearAuthenticator(
-            async_get_clientsession(self.hass)
-        )
         try:
+            self._authenticator = netgear_auth.NetgearAuthenticator(
+                async_get_clientsession(self.hass),
+                proxy_url=proxy_url,
+            )
             result = await self._authenticator.authenticate(email, password)
             return await self._finish_authentication(result)
         except netgear_auth.ChallengeRequired as err:
@@ -153,6 +168,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except netgear_auth.AuthenticationBlocked:
             _LOGGER.warning("Netgear WAF blocked Meural authentication")
             errors["base"] = "auth_blocked"
+        except netgear_auth.InvalidProxy:
+            errors["base"] = "invalid_proxy"
         except netgear_auth.CannotConnect:
             _LOGGER.warning("Cannot connect to Netgear authentication services")
             errors["base"] = "cannot_connect"

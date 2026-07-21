@@ -11,6 +11,7 @@
             "invalid_auth": "Invalid authentication credentials",
             "invalid_code": "The verification code is invalid or expired",
             "auth_blocked": "NETGEAR temporarily blocked this sign-in. Stop retrying and try again later.",
+            "invalid_proxy": "Enter a valid http:// proxy URL without a path, query, or fragment.",
             "unknown": "Unexpected error"
         },
         "step": {
@@ -18,13 +19,21 @@
                 "description": "Sign in with your NETGEAR account. NETGEAR may send a one-time verification code.",
                 "data": {
                     "password": "Password",
-                    "email": "Email"
+                    "email": "Email",
+                    "login_proxy": "Temporary login proxy (optional)"
+                },
+                "data_description": {
+                    "login_proxy": "HTTP proxy used only for this sign-in, for example http://user:password@192.168.1.10:8080. It is not saved."
                 }
             },
             "reauth_confirm": {
                 "description": "Sign in again for {email}.",
                 "data": {
-                    "password": "Password"
+                    "password": "Password",
+                    "login_proxy": "Temporary login proxy (optional)"
+                },
+                "data_description": {
+                    "login_proxy": "HTTP proxy used only for this sign-in, for example http://user:password@192.168.1.10:8080. It is not saved."
                 }
             },
             "challenge": {

@@ -5,6 +5,12 @@ All notable changes to the ha-meural Home Assistant integration will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0-beta.2] - 2026-07-21
+
+### Added
+- Added an optional temporary HTTP CONNECT proxy for interactive login and OTP challenges. This allows a blocked home IP to complete NETGEAR authentication through a trusted device on another connection without routing all Home Assistant traffic through a VPN.
+- The temporary proxy is validated, used only by the active config flow, and never stored in the Home Assistant config entry.
+
 ## [2.4.0-beta.1] - 2026-07-15
 
 ### Fixed

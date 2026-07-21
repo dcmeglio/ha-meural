@@ -152,6 +152,45 @@ class NetgearAuthenticatorTest(unittest.IsolatedAsyncioTestCase):
             session.requests[2]["json"]["ChallengeResponses"]["ANSWER"],
         )
 
+    async def test_temporary_proxy_routes_complete_login(self) -> None:
+        session = FakeSession(
+            password_challenge(),
+            cognito_success(),
+            authorize_success(),
+            meural_token_success(),
+        )
+        proxy_url = "http://meural:temporary@192.168.1.10:8080"
+        authenticator = auth.NetgearAuthenticator(
+            session,
+            "trust-id",
+            proxy_url=proxy_url,
+        )
+
+        await authenticator.authenticate("person@example.com", "secret")
+
+        self.assertEqual(4, len(session.requests))
+        self.assertTrue(
+            all(request["proxy"] == proxy_url for request in session.requests)
+        )
+
+    def test_temporary_proxy_validation(self) -> None:
+        self.assertIsNone(auth.normalize_http_proxy(""))
+        self.assertEqual(
+            "http://host.local:8080",
+            auth.normalize_http_proxy(" http://host.local:8080 "),
+        )
+
+        for invalid_proxy in (
+            "https://host.local:8080",
+            "http://",
+            "http://host.local:99999",
+            "http://host.local:8080/path",
+            "http://host.local:8080?query=value",
+        ):
+            with self.subTest(proxy=invalid_proxy):
+                with self.assertRaises(auth.InvalidProxy):
+                    auth.normalize_http_proxy(invalid_proxy)
+
     async def test_refresh_uses_netgear_accounts(self) -> None:
         session = FakeSession(
             FakeResponse(
@@ -175,6 +214,7 @@ class NetgearAuthenticatorTest(unittest.IsolatedAsyncioTestCase):
             auth.MEURAL_OAUTH_CLIENT_ID,
             session.requests[0]["headers"]["appkey"],
         )
+        self.assertNotIn("proxy", session.requests[0])
 
     async def test_waf_block_has_specific_error(self) -> None:
         session = FakeSession(
