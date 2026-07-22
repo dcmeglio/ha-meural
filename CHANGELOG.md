@@ -5,6 +5,14 @@ All notable changes to the ha-meural Home Assistant integration will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0-beta.7] - 2026-07-22
+
+### Fixed
+- Added one automatic retry for interrupted, read-only Canvas requests.
+- Prevented reuse of HTTP connections that the embedded Canvas web server may reset.
+- Kept transient local connection failures at debug level and only warn after three consecutive failed updates, with rate-limited reminders during a longer outage.
+- Continued serving cached Canvas state during temporary local connection failures.
+
 ## [2.4.0-beta.6] - 2026-07-21
 
 ### Added

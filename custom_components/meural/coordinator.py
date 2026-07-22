@@ -26,6 +26,9 @@ from .pymeural import DeviceTurnedOff, LocalMeural, PyMeural
 
 _LOGGER = logging.getLogger(__name__)
 
+LOCAL_FAILURE_WARNING_THRESHOLD = 3
+LOCAL_FAILURE_REMINDER_INTERVAL = 30
+
 
 def _normalize_backlight(value: Any) -> int | None:
     """Normalize a Canvas backlight response to a percentage."""
@@ -207,6 +210,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.device_id = str(device["id"])
         self.local_meural = LocalMeural(device, session)
         self._sleeping = True
+        self._local_failure_count = 0
         self.cloud_coordinator: CloudDataUpdateCoordinator | None = None
 
         super().__init__(
@@ -250,6 +254,46 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         return backlight if backlight is not None else _normalize_backlight(fallback)
 
+    def _mark_local_update_successful(self) -> None:
+        """Clear the transient local failure counter after a successful update."""
+        if self._local_failure_count:
+            _LOGGER.debug(
+                "Meural device %s: Local connection recovered after %d failed update(s)",
+                self.device.get("alias", self.device_id),
+                self._local_failure_count,
+            )
+            self._local_failure_count = 0
+
+    def _cached_data_after_connection_failure(self, err: Exception) -> dict[str, Any]:
+        """Return cached data and rate-limit warnings for local connection failures."""
+        self._local_failure_count += 1
+        should_warn = (
+            self._local_failure_count == LOCAL_FAILURE_WARNING_THRESHOLD
+            or self._local_failure_count % LOCAL_FAILURE_REMINDER_INTERVAL == 0
+        )
+        log = _LOGGER.warning if should_warn else _LOGGER.debug
+        log(
+            "Meural device %s: Local update failed %d consecutive time(s); "
+            "using cached data (%s)",
+            self.device.get("alias", self.device_id),
+            self._local_failure_count,
+            err,
+        )
+
+        cached = self.data or {}
+        return {
+            "sleeping": self._sleeping,
+            "galleries": cached.get("galleries", []),
+            "gallery_status": cached.get("gallery_status", {}),
+            "gsensor": cached.get("gsensor"),
+            "orientation": cached.get("orientation"),
+            "lux": cached.get("lux"),
+            "backlight": cached.get("backlight"),
+            "free_space": cached.get("free_space"),
+            "wifi_signal": cached.get("wifi_signal"),
+            "version": cached.get("version"),
+        }
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from Meural local device API."""
         try:
@@ -284,6 +328,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 except (aiohttp.ClientError, asyncio.TimeoutError):
                     pass  # Fall back to cached values initialized above
                 backlight = await self._async_get_backlight(system_backlight, backlight)
+                self._mark_local_update_successful()
                 return {
                     "sleeping": True,
                     "galleries": cached.get("galleries", []),
@@ -328,6 +373,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 system_backlight, cached_backlight
             )
 
+            self._mark_local_update_successful()
             return {
                 "sleeping": False,
                 "galleries": sorted(galleries, key=lambda i: i["name"]),
@@ -347,28 +393,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # DeviceTurnedOff (ClientConnectorError) is also transient - the local web
             # server remains running during Meural sleep mode, so this only means the
             # device temporarily dropped off the network, not that it is genuinely sleeping.
-            _LOGGER.warning(
-                "Meural device %s: Failed to contact local device (%s)",
-                self.device.get("alias", self.device_id),
-                err,
-            )
-            _LOGGER.debug(
-                "Meural device %s: Returning cached data due to connection failure",
-                self.device.get("alias", self.device_id),
-            )
-            cached = self.data or {}
-            return {
-                "sleeping": self._sleeping,
-                "galleries": cached.get("galleries", []),
-                "gallery_status": cached.get("gallery_status", {}),
-                "gsensor": cached.get("gsensor"),
-                "orientation": cached.get("orientation"),
-                "lux": cached.get("lux"),
-                "backlight": cached.get("backlight"),
-                "free_space": cached.get("free_space"),
-                "wifi_signal": cached.get("wifi_signal"),
-                "version": cached.get("version"),
-            }
+            return self._cached_data_after_connection_failure(err)
         except Exception:
             # Unexpected error
             _LOGGER.exception(

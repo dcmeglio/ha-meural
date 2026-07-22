@@ -21,6 +21,8 @@ from .netgear_auth import (
 _LOGGER = logging.getLogger(__name__)
 
 BASE_URL = "https://api.meural.com/v1/"
+LOCAL_READ_ATTEMPTS = 2
+LOCAL_RETRY_DELAY = 0.25
 
 
 async def authenticate(
@@ -213,6 +215,7 @@ class LocalMeural:
     async def request(
         self, method: str, path: str, data: dict[str, Any] | None = None
     ) -> dict[str, Any]:
+        """Send a request to the Canvas, retrying safe reads once."""
         url = f"http://{self.ip}/remote/{path}"
         kwargs = {}
         if data:
@@ -220,18 +223,40 @@ class LocalMeural:
                 kwargs["params"] = data
             else:
                 kwargs["data"] = data
-        try:
-            async with asyncio.timeout(10):
-                resp = await self.session.request(
-                    method,
-                    url,
-                    raise_for_status=True,
-                    **kwargs,
-                )
-            response = await resp.json(content_type=None)
-            return response["response"]
-        except aiohttp.client_exceptions.ClientConnectorError:
-            raise DeviceTurnedOff
+
+        # The embedded Canvas web server occasionally resets keep-alive
+        # connections. Avoid reusing them and retry read-only endpoints once.
+        is_safe_read = method.lower() == "get" and path.startswith(
+            ("control_check/", "get_", "identify/")
+        )
+        attempts = LOCAL_READ_ATTEMPTS if is_safe_read else 1
+
+        for attempt in range(attempts):
+            try:
+                async with asyncio.timeout(10):
+                    async with self.session.request(
+                        method,
+                        url,
+                        headers={"Connection": "close"},
+                        raise_for_status=True,
+                        **kwargs,
+                    ) as resp:
+                        response = await resp.json(content_type=None)
+                        return response["response"]
+            except (aiohttp.ClientConnectionError, asyncio.TimeoutError) as err:
+                if attempt + 1 < attempts:
+                    _LOGGER.debug(
+                        "Meural device %s: Local read %s was interrupted; retrying once",
+                        self.device.get("alias", self.ip),
+                        path,
+                    )
+                    await asyncio.sleep(LOCAL_RETRY_DELAY)
+                    continue
+                if isinstance(err, aiohttp.ClientConnectorError):
+                    raise DeviceTurnedOff from err
+                raise
+
+        raise RuntimeError("Local Meural request exhausted all attempts")
 
     async def send_key_right(self) -> dict[str, Any]:
         """Send key right command."""
