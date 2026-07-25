@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import json
+import logging
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import aiohttp
-
 from aiohttp.client_exceptions import ClientResponseError
-
 from homeassistant.exceptions import HomeAssistantError
 
 from .netgear_auth import (
@@ -212,6 +211,14 @@ class LocalMeural:
         self.device = device
         self.session = session
 
+    def update_device(self, device: dict[str, Any]) -> bool:
+        """Update cloud device data and return whether its local IP changed."""
+        previous_ip = self.ip
+        self.device = device
+        if new_ip := device.get("localIp"):
+            self.ip = str(new_ip)
+        return self.ip != previous_ip
+
     async def request(
         self, method: str, path: str, data: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -253,7 +260,9 @@ class LocalMeural:
                     await asyncio.sleep(LOCAL_RETRY_DELAY)
                     continue
                 if isinstance(err, aiohttp.ClientConnectorError):
-                    raise DeviceTurnedOff from err
+                    raise DeviceTurnedOff(
+                        f"Cannot connect to Canvas at {self.ip}: {err}"
+                    ) from err
                 raise
 
         raise RuntimeError("Local Meural request exhausted all attempts")

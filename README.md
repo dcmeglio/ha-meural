@@ -34,7 +34,7 @@ If NETGEAR sends a one-time verification code by email, SMS, or an authenticator
 
 #### Mobile workaround for a NETGEAR WAF/IP block
 
-Version `2.4.0-beta.7` offers a browser-assisted mobile sign-in:
+Version `2.4.0-beta.8` offers a browser-assisted mobile sign-in:
 
 1. Open Home Assistant through the external HTTPS address that also works on your phone.
 2. Start Meural setup or reauthentication and choose **Sign in on a phone to bypass a WAF/IP block**.
@@ -98,7 +98,7 @@ Cloud-backed setting entities are created only when the Canvas reports support f
 
 ### Local connection stability
 
-The Canvas runs a small embedded web server that can occasionally reset or disconnect a request. The integration retries interrupted read-only requests once, uses a fresh HTTP connection for every local request, and keeps the last known state during a temporary interruption. A warning is only logged after three consecutive local updates fail.
+The Canvas runs a small embedded web server that can occasionally reset or disconnect a request. The integration retries interrupted read-only requests once, uses a fresh HTTP connection for every local request, and keeps the last known state during a temporary interruption. If three consecutive updates fail, local entities become unavailable until communication recovers. The local client automatically follows IP address changes reported by the Meural cloud after DHCP lease renewals.
 
 Do not configure the same Canvas simultaneously in this integration and the separate **Meural Canvas (Local)** integration unless you specifically need both. Each integration polls the Canvas independently, which doubles the requests to its limited local web server and can increase connection resets.
 

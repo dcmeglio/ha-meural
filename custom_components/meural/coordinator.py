@@ -9,7 +9,6 @@ from datetime import timedelta
 from typing import Any
 
 import aiohttp
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -27,7 +26,6 @@ from .pymeural import DeviceTurnedOff, LocalMeural, PyMeural
 _LOGGER = logging.getLogger(__name__)
 
 LOCAL_FAILURE_WARNING_THRESHOLD = 3
-LOCAL_FAILURE_REMINDER_INTERVAL = 30
 
 
 def _normalize_backlight(value: Any) -> int | None:
@@ -73,7 +71,7 @@ class CloudDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     def register_local_coordinator(
-        self, device_id: str, local_coordinator: "LocalDataUpdateCoordinator"
+        self, device_id: str, local_coordinator: LocalDataUpdateCoordinator
     ) -> None:
         """Register a local coordinator for sleep state tracking."""
         self._local_coordinators[device_id] = local_coordinator
@@ -164,6 +162,13 @@ class CloudDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Only fetch device settings on the regular poll interval.
             # Gallery data is fetched separately via async_refresh_galleries().
             devices = await self.meural.get_user_devices()
+            devices_by_id = {str(device["id"]): device for device in devices}
+
+            # Keep the local clients on the IP currently reported by the cloud.
+            # Canvas IP addresses can change after DHCP lease renewals.
+            for device_id, local_coordinator in self._local_coordinators.items():
+                if device := devices_by_id.get(device_id):
+                    local_coordinator.update_device(device)
 
             # Preserve existing gallery data between polls
             existing = self.data or {}
@@ -175,7 +180,7 @@ class CloudDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.hass.async_create_task(self.async_refresh_galleries())
 
             return {
-                "devices": {str(device["id"]): device for device in devices},
+                "devices": devices_by_id,
                 "device_galleries": device_galleries,
                 "user_galleries": user_galleries,
             }
@@ -223,7 +228,15 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def update_device(self, device: dict[str, Any]) -> None:
         """Update device reference with latest cloud data."""
         self.device = device
-        self.local_meural.device = device
+        previous_ip = self.local_meural.ip
+        if self.local_meural.update_device(device):
+            _LOGGER.info(
+                "Meural device %s: Local IP changed from %s to %s",
+                device.get("alias", self.device_id),
+                previous_ip,
+                self.local_meural.ip,
+            )
+            self._local_failure_count = 0
 
     @property
     def sleeping(self) -> bool:
@@ -265,20 +278,24 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._local_failure_count = 0
 
     def _cached_data_after_connection_failure(self, err: Exception) -> dict[str, Any]:
-        """Return cached data and rate-limit warnings for local connection failures."""
+        """Return cached data briefly, then mark the local coordinator unavailable."""
         self._local_failure_count += 1
-        should_warn = (
-            self._local_failure_count == LOCAL_FAILURE_WARNING_THRESHOLD
-            or self._local_failure_count % LOCAL_FAILURE_REMINDER_INTERVAL == 0
-        )
-        log = _LOGGER.warning if should_warn else _LOGGER.debug
-        log(
+        reason = str(err).strip() or err.__class__.__name__
+        _LOGGER.debug(
             "Meural device %s: Local update failed %d consecutive time(s); "
-            "using cached data (%s)",
+            "using cached data from %s (%s)",
             self.device.get("alias", self.device_id),
             self._local_failure_count,
-            err,
+            self.local_meural.ip,
+            reason,
         )
+
+        if self._local_failure_count >= LOCAL_FAILURE_WARNING_THRESHOLD:
+            raise UpdateFailed(
+                f"Cannot reach {self.device.get('alias', self.device_id)} at "
+                f"{self.local_meural.ip} after {self._local_failure_count} updates: "
+                f"{reason}"
+            ) from err
 
         cached = self.data or {}
         return {

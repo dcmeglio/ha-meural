@@ -7,7 +7,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import aiohttp
 
@@ -19,7 +19,7 @@ package.__path__ = [str(COMPONENT_PATH)]
 sys.modules[PACKAGE_NAME] = package
 
 try:
-    from homeassistant.exceptions import HomeAssistantError  # noqa: F401
+    from homeassistant.exceptions import HomeAssistantError
 except ImportError:
     homeassistant = types.ModuleType("homeassistant")
     exceptions = types.ModuleType("homeassistant.exceptions")
@@ -46,7 +46,7 @@ class FakeResponse:
     def __init__(self, body: Any) -> None:
         self.body = body
 
-    async def __aenter__(self) -> "FakeResponse":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, exc_type, exc, traceback) -> None:
@@ -128,6 +128,35 @@ class LocalMeuralRequestTest(unittest.IsolatedAsyncioTestCase):
             await client.send_key_right()
 
         self.assertEqual(1, len(session.requests))
+
+    async def test_device_update_uses_new_cloud_ip(self) -> None:
+        session = FakeSession(FakeResponse({"response": True}))
+        client = pymeural.LocalMeural(
+            {"localIp": "192.0.2.10", "alias": "Test Canvas"}, session
+        )
+
+        changed = client.update_device(
+            {"localIp": "192.0.2.25", "alias": "Test Canvas"}
+        )
+        sleeping = await client.send_get_sleep()
+
+        self.assertTrue(changed)
+        self.assertTrue(sleeping)
+        self.assertEqual("192.0.2.25", client.ip)
+        self.assertIn("http://192.0.2.25/", session.requests[0]["url"])
+
+    async def test_device_update_reports_unchanged_ip(self) -> None:
+        session = FakeSession()
+        client = pymeural.LocalMeural(
+            {"localIp": "192.0.2.10", "alias": "Test Canvas"}, session
+        )
+
+        changed = client.update_device(
+            {"localIp": "192.0.2.10", "alias": "Renamed Canvas"}
+        )
+
+        self.assertFalse(changed)
+        self.assertEqual("Renamed Canvas", client.device["alias"])
 
 
 if __name__ == "__main__":

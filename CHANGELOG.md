@@ -5,6 +5,14 @@ All notable changes to the ha-meural Home Assistant integration will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0-beta.8] - 2026-07-25
+
+### Fixed
+- Updated the local Canvas client when the Meural cloud reports a changed DHCP IP address.
+- Removed the dependency on the media-player entity for propagating cloud device updates to local coordinators.
+- Replaced empty `DeviceTurnedOff` details with the attempted Canvas IP and underlying connection error.
+- Marked local entities unavailable after three consecutive failed updates, using Home Assistant's built-in one-time failure and recovery reporting instead of repeating warning reminders indefinitely.
+
 ## [2.4.0-beta.7] - 2026-07-22
 
 ### Fixed
