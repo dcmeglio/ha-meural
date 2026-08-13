@@ -34,8 +34,6 @@ If NETGEAR sends a one-time verification code by email, SMS, or an authenticator
 
 #### Mobile workaround for a NETGEAR WAF/IP block
 
-Version `2.4.2-beta.1` offers a browser-assisted mobile sign-in:
-
 1. Open Home Assistant through the external HTTPS address that also works on your phone.
 2. Start Meural setup or reauthentication and choose **Sign in on a phone to bypass a WAF/IP block**.
 3. Open the one-time link on the phone and turn off Wi-Fi before entering the NETGEAR account details.
@@ -43,11 +41,11 @@ Version `2.4.2-beta.1` offers a browser-assisted mobile sign-in:
 
 The one-time link expires after 10 minutes and can submit a result only once. The account password and verification code are sent directly from the phone browser to NETGEAR Cognito; they are not sent back to or stored by Home Assistant. Home Assistant receives the short-lived Cognito result and completes the Meural token exchange. This requires Home Assistant to be reachable through an external HTTPS address. If NETGEAR also blocks the final token exchange from the home IP, stop retrying and wait for NETGEAR support to remove the block.
 
-**Note 2:** If you are upgrading to v2.0.0 from v1.x, the upgrade is fully backward compatible — no re-configuration or re-authentication is needed. Home Assistant will handle the migration automatically on restart. However, if you are upgrading from v0.x, you have to delete this integration in *Settings*, *Devices & Services*, *Integrations*, and then re-add it to log in again. This will set up the configuration entries required by v1.0.0 and later.  
+#### "Setup of config entry ... cancelled" after mobile sign-in
 
-**Note 3:** If your login stops working, Home Assistant will prompt you to reauthenticate with a notification under *Settings* → *Devices & Services*. Temporary upstream issues connecting to the Meural cloud are treated as connectivity failures and do not repeat an interactive password login in the background.
+If the Home Assistant log shows `Setup of config entry '<email>' for meural integration cancelled` with a `CancelledError` right after completing mobile sign-in, the NETGEAR/Meural sign-in itself already succeeded — the cancellation happens later, while Home Assistant is connecting to the Canvas over the local network to finish setup. 
 
-**Note 4:** Version `2.4.2-beta.1` incorporates upstream v2.4.1 and requires Home Assistant 2026.8 or newer because it follows the updated `boto3>=1.42.97` dependency constraint.
+Go to *Settings* → *Devices & Services* → *Meural* and select **Reload** on the entry (or restart Home Assistant if it isn't listed yet). Since sign-in already completed, this finishes setup without repeating the mobile sign-in.
 
 ### Media Player
 The integration will detect all Canvas devices registered to your account. Each Canvas will become a Media Player entity and can be added to your dashboard using any component that supports it, for example the standard Media Control card. By default your entity's name will correspond to the name of the Canvas, which out-of-the-box consists of a painter's name and 3 digits like `picasso-428` - resulting in the entity `media_player.picasso-428` being created. You can override the name and entity ID in Home Assistant's entity settings.  

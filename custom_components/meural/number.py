@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import CloudDataUpdateCoordinator
+from .entity import MeuralDeviceInfoMixin
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,7 +66,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up Meural number entities."""
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
-    meural = entry_data["meural"]
     cloud_coordinator: CloudDataUpdateCoordinator = entry_data["cloud_coordinator"]
 
     entities = []
@@ -80,7 +80,6 @@ async def async_setup_entry(
                 continue
             entities.append(
                 MeuralSettingNumber(
-                    meural,
                     cloud_coordinator,
                     device,
                     description,
@@ -90,7 +89,9 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MeuralSettingNumber(CoordinatorEntity[CloudDataUpdateCoordinator], NumberEntity):
+class MeuralSettingNumber(
+    MeuralDeviceInfoMixin, CoordinatorEntity[CloudDataUpdateCoordinator], NumberEntity
+):
     """Numeric cloud setting for a Meural Canvas device."""
 
     _attr_entity_category = EntityCategory.CONFIG
@@ -98,14 +99,12 @@ class MeuralSettingNumber(CoordinatorEntity[CloudDataUpdateCoordinator], NumberE
 
     def __init__(
         self,
-        meural: Any,
         coordinator: CloudDataUpdateCoordinator,
         device: dict[str, Any],
         description: MeuralNumberDescription,
     ) -> None:
         """Initialize the number entity."""
         super().__init__(coordinator)
-        self.meural = meural
         self._device = device
         self._device_id = str(device["id"])
         self._description = description
@@ -116,11 +115,6 @@ class MeuralSettingNumber(CoordinatorEntity[CloudDataUpdateCoordinator], NumberE
         self._attr_native_max_value = description.maximum
         self._attr_native_step = description.step
         self._attr_native_unit_of_measurement = description.unit
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        """Return device information to link this entity to the Meural device."""
-        return {"identifiers": {(DOMAIN, self._device["productKey"])}}
 
     @property
     def native_value(self) -> float | None:
@@ -145,10 +139,6 @@ class MeuralSettingNumber(CoordinatorEntity[CloudDataUpdateCoordinator], NumberE
             self._description.key,
             value,
         )
-        await self.meural.update_device(self._device_id, {self._description.key: value})
-
-        if self.coordinator.data:
-            device = self.coordinator.data.get("devices", {}).get(self._device_id)
-            if device is not None:
-                device[self._description.key] = value
-                self.coordinator.async_set_updated_data(self.coordinator.data)
+        await self.coordinator.async_apply_device_setting(
+            self._device_id, self._description.key, value
+        )

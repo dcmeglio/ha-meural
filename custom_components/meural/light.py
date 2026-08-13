@@ -18,6 +18,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import CloudDataUpdateCoordinator, LocalDataUpdateCoordinator
+from .entity import MeuralDeviceInfoMixin
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,7 +46,9 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightEntity):
+class MeuralBacklightLight(
+    MeuralDeviceInfoMixin, CoordinatorEntity[LocalDataUpdateCoordinator], LightEntity
+):
     """Backlight brightness control for a Meural Canvas device."""
 
     _attr_color_mode = ColorMode.BRIGHTNESS
@@ -68,13 +71,6 @@ class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightE
         """Clear optimistic brightness once coordinator confirms the new value."""
         self._optimistic_brightness = None
         super()._handle_coordinator_update()
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        """Return device information to link this entity to the Meural device."""
-        return {
-            "identifiers": {(DOMAIN, self._device["productKey"])},
-        }
 
     def _meural_brightness(self) -> int | None:
         """Return current backlight as a Meural value (0-100), or None if unavailable."""

@@ -29,8 +29,19 @@ async def async_setup(hass: HomeAssistant, config: dict):
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Meural from a config entry."""
     if "email" not in entry.data:
-        _LOGGER.warning("Authentication changed. Please set up Meural again")
+        _LOGGER.warning("Meural: Authentication changed. Please set up Meural again")
         return False
+
+    # Earlier builds persisted the account password alongside the tokens.
+    # It is never read back (reauth asks interactively), so scrub it.
+    if "password" in entry.data:
+        _LOGGER.info(
+            "Meural: Removing stored account password from config entry; "
+            "it is no longer used"
+        )
+        data = dict(entry.data)
+        data.pop("password")
+        hass.config_entries.async_update_entry(entry, data=data)
 
     def token_update_callback(
         token: str,
@@ -39,7 +50,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         trust_id: str,
     ) -> None:
         """Persist rotated Meural OAuth tokens."""
-        _LOGGER.debug("Tokens updated. Saving to config entry.")
+        _LOGGER.debug("Meural: Tokens updated. Saving to config entry")
         hass.config_entries.async_update_entry(
             entry,
             data={
@@ -56,6 +67,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data.get("token"),
         token_update_callback,
         async_get_clientsession(hass),
+        entry.entry_id,
         refresh_token=entry.data.get("refresh_token"),
         expires_at=entry.data.get("expires_at"),
         trust_id=entry.data.get("trust_id"),

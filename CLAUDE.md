@@ -31,15 +31,16 @@ To test changes, install the integration in a Home Assistant instance:
 
 The integration uses two DataUpdateCoordinators for efficient polling:
 
-**CloudDataUpdateCoordinator** (`coordinator.py:26-160`):
+**CloudDataUpdateCoordinator** (`coordinator.py:49-226`):
 - Polls Meural cloud API every 60 seconds (device settings only), or 3600 seconds (1 hour) when all devices are sleeping
 - Gallery data fetched separately via `async_refresh_galleries()` every 30 minutes (`GALLERY_UPDATE_INTERVAL`)
 - Gallery refresh triggered synchronously at startup (in `__init__.py` after `async_config_entry_first_refresh()`), as a background task on regular poll when stale, lazily on media browser open, and after `synchronize()` service
 - Handles authentication errors and triggers reauth flow
 - Shared across all devices for a single account
 - Aggregates sleep state across all entities to determine polling interval
+- `async_apply_device_setting()`: writes a cloud-backed setting via `PyMeural.update_device()` then optimistically patches the cached device dict and calls `async_set_updated_data()`; used by the number, select, and switch entities' `async_set_native_value`/`async_select_option`/`async_turn_on`/`async_turn_off` instead of each duplicating that update+patch logic
 
-**LocalDataUpdateCoordinator** (`coordinator.py:163-309`):
+**LocalDataUpdateCoordinator** (`coordinator.py:229-450`):
 - Polls local device API every 10 seconds
 - Each device has its own local coordinator instance
 - Fetches real-time state: sleep status, local galleries, gallery status, gsensor orientation, lux, free space, WiFi signal
@@ -54,13 +55,20 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 - Cloud API client for Meural's REST API (https://api.meural.com/v1/)
 - Uses the current NETGEAR Accounts flow (Cognito `CUSTOM_AUTH`, OAuth token exchange, and NETGEAR refresh endpoint)
 - Handles authentication token lifecycle with callback for persistent storage
-- All API methods are async and use aiohttp
+- Exponential backoff (module-level `_AUTH_BACKOFF_STATE`, see Authentication Flow above) before retrying a failed token refresh, to avoid hammering NETGEAR's auth endpoint during a sustained WAF block or outage
+- All API methods are async and use aiohttp; cloud requests use `async with self.session.request(...)` so the connection is always released back to the pool
 
 **NetgearAuthenticator** (`netgear_auth.py`):
 - Handles password and OTP/MFA Cognito challenges interactively through the config flow
 - Exchanges the Cognito access token for Meural access, ID, and refresh tokens
 - Refreshes Meural access tokens through NETGEAR Accounts without repeating password login
 - Reuses a persistent trust identifier and never uses the stored password for background refresh
+- Detects a NETGEAR CloudFront/WAF block from either a JSON `ForbiddenException`-style body or an HTML block page (CloudFront's own 403 response has no JSON body)
+- A 429 or 5xx from NETGEAR while submitting a challenge answer or refreshing a token raises `CannotConnect`, not a credential/challenge error, so a transient outage doesn't get misreported as a bad code or invalid auth
+- Shared lookup tables (`RESPONSE_KEY_MAP`, `PASSWORD_CHALLENGE_EXCLUSION_KEYWORDS`, `WAF_ERROR_KEYWORDS`, `WAF_BLOCK_PAGE_KEYWORDS`, `USER_MIGRATION_KEYWORDS`) are re-exported and embedded verbatim into the browser-side Cognito flow in `mobile_auth.py`, so the standalone mobile sign-in page's challenge/WAF-detection logic can't drift from this module's data (the control flow itself still has to be duplicated in JS since that page runs standalone in a phone's browser)
+
+**MeuralDeviceInfoMixin** (`entity.py`):
+- Shared `device_info` property (keyed by the device's `productKey`) mixed into the light, number, select, sensor, and switch entity classes, replacing a property that used to be duplicated in each of those files
 
 **LocalMeural** (`pymeural.py`):
 - Local device API client for Canvas web server (http://DEVICE-IP/remote/)
@@ -101,9 +109,10 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 2. NetgearAuthenticator starts Cognito `CUSTOM_AUTH` and answers the password challenge
 3. If NETGEAR requires OTP/MFA, the config flow asks for the verification code
 4. The Cognito token is exchanged through NETGEAR Accounts for Meural OAuth tokens
-5. Meural tokens are stored in the config entry; the password remains only for v2.3.x rollback compatibility
-6. Access tokens are refreshed through NETGEAR Accounts
-7. If the Meural refresh token fails, Home Assistant triggers the reauth flow
+5. Meural tokens are stored in the config entry; the password is never persisted (used only in-memory for the interactive sign-in, then discarded). `__init__.py` scrubs any password still stored by a pre-upgrade config entry on the next setup.
+6. Reauthentication (`async_step_reauth`) reuses the config entry's existing `trust_id`, so NETGEAR typically recognizes the device as already-trusted and skips a fresh OTP/MFA challenge. `async_step_reauth_confirm` remains as a compatibility shim (forwards to `async_step_password_login`) for reauth flows already open in the frontend before an upgrade.
+7. Access tokens are refreshed through NETGEAR Accounts. A failed refresh (invalid auth, connection error, or WAF block) is recorded in `pymeural.py`'s module-level `_AUTH_BACKOFF_STATE`, keyed by `trust_id` (or the config entry ID before one is known); further refresh attempts back off exponentially (60s, doubling to a 30-minute cap) until a refresh succeeds or `reset_auth_backoff()` clears it after a fresh interactive login. State is kept at module scope, not on the `PyMeural` instance, so it survives Home Assistant recreating `PyMeural` on every `ConfigEntryNotReady` retry.
+8. If the Meural refresh token fails outright (`InvalidAuth`), Home Assistant triggers the reauth flow; a `CannotConnect` or `AuthenticationBlocked` (WAF/rate-limit) failure raises `UpdateFailed` for retry instead, since re-entering credentials can't fix a network or WAF issue
 
 ### Data Flow
 
@@ -123,7 +132,10 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 - `media_player.py`: Media player entity implementation and custom services
 - `light.py`: Backlight light entity
 - `sensor.py`: Sensor entities (ambient light, free space, WiFi signal, last cloud contact)
+- `entity.py`: `MeuralDeviceInfoMixin`, the shared `device_info` property used by the light, number, select, sensor, and switch entities
 - `pymeural.py`: API clients for both cloud and local interfaces
+- `netgear_auth.py`: NETGEAR Accounts/Cognito authentication (interactive login, OTP/MFA challenges, token refresh, WAF detection)
+- `mobile_auth.py`: Browser-assisted mobile sign-in handoff for a blocked home IP
 - `config_flow.py`: Configuration flow for UI setup
 - `const.py`: Constants (update intervals, domain name)
 - `services.yaml`: Custom service definitions
@@ -131,8 +143,7 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 
 ## Dependencies
 
-- **boto3>=1.42.97**: Retained from upstream v2.4.1 for Home Assistant 2026.8 dependency compatibility; the fork's interactive NETGEAR flow itself uses aiohttp
-- **aiohttp**: Async HTTP client (provided by Home Assistant)
+- **aiohttp**: Async HTTP client (provided by Home Assistant); the fork's interactive NETGEAR flow uses this, not boto3 — upstream's `manifest.json` still lists `boto3` (its own auth flow depends on it), so merging from upstream will keep reintroducing a `boto3` requirement into this fork's `manifest.json` that nothing here actually imports. Drop it again after each upstream merge.
 - Home Assistant 2026.8+ (upstream v2.4.1 dependency baseline)
 - Python 3.11+
 

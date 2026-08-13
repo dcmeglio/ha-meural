@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import aiohttp
+from homeassistant.exceptions import HomeAssistantError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,8 +29,39 @@ COGNITO_HEADERS = {
     "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
 }
 
+# These small lookup tables are also embedded verbatim into the browser-side
+# Cognito flow in mobile_auth.py (which can't call back into this module
+# since it must run standalone in a phone's browser). Sourcing the mobile
+# page's copies from these constants, rather than hand-transcribing them,
+# keeps both implementations' data in sync automatically - only the control
+# flow around them still has to be duplicated in JS.
+RESPONSE_KEY_MAP = {
+    "EMAIL_MFA": "EMAIL_MFA_CODE",
+    "EMAIL_OTP": "EMAIL_OTP_CODE",
+    "SMS_MFA": "SMS_MFA_CODE",
+    "SMS_OTP": "SMS_OTP_CODE",
+    "SOFTWARE_TOKEN_MFA": "SOFTWARE_TOKEN_MFA_CODE",
+    "NEW_PASSWORD_REQUIRED": "NEW_PASSWORD",
+}
+PASSWORD_CHALLENGE_EXCLUSION_KEYWORDS = (
+    "otp",
+    "verification",
+    "email",
+    "phone",
+    "code",
+)
+WAF_ERROR_KEYWORDS = ("forbiddenexception", "waf")
+# Netgear Accounts sits behind CloudFront/WAF, which answers a blocked request
+# with an HTML 403 page instead of a Cognito-style JSON error. These keywords
+# only count as a block when paired with a 403 status (see _is_waf_error).
+WAF_BLOCK_PAGE_KEYWORDS = ("request blocked", "cloudfront", "<html")
+# Netgear's auth Lambda signals an unmigrated account with a user-not-found
+# error; Cognito's own serialization of that condition is UserNotFoundException,
+# so match both (see _is_user_migration_error).
+USER_MIGRATION_KEYWORDS = ("user_not_found", "usernotfoundexception")
 
-class MeuralAuthError(Exception):
+
+class MeuralAuthError(HomeAssistantError):
     """Base exception for Meural authentication failures."""
 
 
@@ -144,6 +176,10 @@ class NetgearAuthenticator:
                 raise AuthenticationBlocked(
                     "Netgear blocked the authentication request"
                 ) from err
+            if err.status == 429 or err.status >= 500:
+                raise CannotConnect(
+                    "Netgear authentication is temporarily unavailable"
+                ) from err
             raise InvalidChallenge(
                 "The verification code is invalid or expired"
             ) from err
@@ -167,6 +203,10 @@ class NetgearAuthenticator:
                 },
             )
         except _HttpError as err:
+            if self._is_waf_error(err):
+                raise AuthenticationBlocked(
+                    "Netgear blocked the token refresh"
+                ) from err
             if err.status == 429 or err.status >= 500:
                 raise CannotConnect(
                     "Netgear temporarily rejected the token refresh"
@@ -199,6 +239,13 @@ class NetgearAuthenticator:
                     "Cognito returned neither tokens nor a supported challenge"
                 )
 
+            _LOGGER.debug(
+                "Meural: Cognito challenge %s (attempt %d) with parameters: %s",
+                challenge_name,
+                attempt,
+                parameters,
+            )
+
             pending = PendingChallenge(
                 username=username,
                 session=challenge_session,
@@ -209,6 +256,10 @@ class NetgearAuthenticator:
             )
 
             if password and self._password_answers_challenge(pending):
+                _LOGGER.debug(
+                    "Meural: Answering Cognito challenge %s with the account password",
+                    challenge_name,
+                )
                 try:
                     response = await self._respond_to_challenge(pending, password)
                 except _HttpError as err:
@@ -356,17 +407,22 @@ class NetgearAuthenticator:
         if not access_token or not refresh_token:
             raise InvalidAuth("Netgear returned an incomplete Meural session")
 
-        expires_in = self._pick(body, "expires_in", "expiresIn") or 3600
+        expires_in = self._pick(body, "expires_in", "expiresIn")
+        if expires_in is None:
+            expires_in = 3600
         try:
             fallback_expiry = time.time() + float(expires_in)
         except (TypeError, ValueError):
             fallback_expiry = time.time() + 3600
 
+        jwt_expiry = self._jwt_expiration(str(access_token))
+        expires_at = jwt_expiry if jwt_expiry is not None else fallback_expiry
+
         return AuthResult(
             access_token=str(access_token),
             refresh_token=str(refresh_token),
             id_token=self._pick(body, "id_token", "idToken"),
-            expires_at=self._jwt_expiration(str(access_token)) or fallback_expiry,
+            expires_at=expires_at,
             trust_id=self.trust_id,
         )
 
@@ -391,33 +447,45 @@ class NetgearAuthenticator:
 
     @staticmethod
     def _password_answers_challenge(challenge: PendingChallenge) -> bool:
+        """Return True if this challenge is CUSTOM_AUTH's password prompt.
+
+        Netgear's CUSTOM_AUTH flow verifies the password via the first
+        CUSTOM_CHALLENGE; interactive challenges (OTP/MFA) only follow it.
+        Excluding challenges whose parameters mention a code/OTP/contact
+        method avoids guessing at the undocumented ChallengeParameters: if
+        the first challenge is actually a code prompt, it's routed to the
+        user instead of being wrongly answered with the password.
+        """
         if challenge.name != "CUSTOM_CHALLENGE" or challenge.attempt != 1:
             return False
         description = json.dumps(challenge.parameters).lower()
         return not any(
             keyword in description
-            for keyword in ("otp", "verification", "email", "phone", "code")
+            for keyword in PASSWORD_CHALLENGE_EXCLUSION_KEYWORDS
         )
 
     @staticmethod
     def _response_key(challenge_name: str) -> str:
-        return {
-            "EMAIL_MFA": "EMAIL_MFA_CODE",
-            "EMAIL_OTP": "EMAIL_OTP_CODE",
-            "SMS_MFA": "SMS_MFA_CODE",
-            "SMS_OTP": "SMS_OTP_CODE",
-            "SOFTWARE_TOKEN_MFA": "SOFTWARE_TOKEN_MFA_CODE",
-            "NEW_PASSWORD_REQUIRED": "NEW_PASSWORD",
-        }.get(challenge_name, "ANSWER")
+        return RESPONSE_KEY_MAP.get(challenge_name, "ANSWER")
 
     @staticmethod
     def _is_user_migration_error(err: _HttpError) -> bool:
-        return "user_not_found" in json.dumps(err.body).lower()
+        """Return True if Cognito reports the account is not migrated to CUSTOM_AUTH.
+
+        A false positive is harmless: the USER_PASSWORD_AUTH fallback then
+        fails with InvalidAuth anyway.
+        """
+        description = json.dumps(err.body).lower()
+        return any(keyword in description for keyword in USER_MIGRATION_KEYWORDS)
 
     @staticmethod
     def _is_waf_error(err: _HttpError) -> bool:
         description = json.dumps(err.body).lower()
-        return "forbiddenexception" in description or "waf block" in description
+        if any(keyword in description for keyword in WAF_ERROR_KEYWORDS):
+            return True
+        return err.status == 403 and any(
+            keyword in description for keyword in WAF_BLOCK_PAGE_KEYWORDS
+        )
 
     @staticmethod
     def _unwrap(response: dict[str, Any]) -> dict[str, Any]:
@@ -440,6 +508,6 @@ class NetgearAuthenticator:
         try:
             encoded = parts[1] + "=" * (-len(parts[1]) % 4)
             payload = json.loads(base64.urlsafe_b64decode(encoded))
-            return float(payload["exp"]) if payload.get("exp") else None
+            return float(payload["exp"]) if "exp" in payload else None
         except (binascii.Error, KeyError, TypeError, ValueError):
             return None

@@ -9,8 +9,8 @@
   "homekit": {},
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/GuySie/ha-meural/issues",
-  "requirements": ["boto3>=1.42.97"],
+  "requirements": [],
   "ssdp": [],
-  "version": "2.4.2-beta.1",
+  "version": "2.5.0",
   "zeroconf": []
 }

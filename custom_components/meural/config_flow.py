@@ -16,6 +16,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from . import netgear_auth
 from .const import DOMAIN
 from .mobile_auth import create_mobile_auth_url
+from .pymeural import reset_auth_backoff
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._authenticator: netgear_auth.NetgearAuthenticator | None = None
         self._pending_challenge: netgear_auth.PendingChallenge | None = None
         self._email: str | None = None
-        self._password: str | None = None
+        self._trust_id: str | None = None
         self._mobile_cognito_access_token: str | None = None
         self._mobile_trust_id: str | None = None
 
@@ -71,7 +72,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._email = user_input[CONF_EMAIL].strip()
             if self._email is None:
                 return self.async_abort(reason="unknown")
-            _LOGGER.debug("Attempting Meural authentication for %s", self._email)
+            _LOGGER.debug("Meural: Attempting authentication for %s", self._email)
             result = await self._start_authentication(
                 self._email,
                 user_input[CONF_PASSWORD],
@@ -97,6 +98,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Start reauthentication for an expired legacy or Meural session."""
         self._email = entry_data[CONF_EMAIL]
+        # Reuse the entry's trust_id so Netgear recognizes this install as
+        # already-trusted, typically skipping a fresh OTP/MFA challenge.
+        self._trust_id = entry_data.get("trust_id")
         return await self.async_step_reauth_method()
 
     async def async_step_reauth_method(
@@ -128,7 +132,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._mobile_trust_id = user_input[CONF_TRUST_ID]
             return self.async_external_step_done(next_step_id="mobile_finish")
 
-        self._password = None
         request = http.current_request.get()
         if request is None or not (
             frontend_base := request.headers.get(HEADER_FRONTEND_BASE)
@@ -140,6 +143,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.hass,
                 self.flow_id,
                 frontend_base,
+                trust_id=self._trust_id,
             )
         except ValueError:
             return self.async_abort(reason="external_url_unavailable")
@@ -169,13 +173,21 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._mobile_cognito_access_token = None
             return await self._finish_authentication(result)
         except netgear_auth.AuthenticationBlocked:
+            _LOGGER.warning("Meural: Netgear WAF blocked mobile sign-in token exchange")
             errors["base"] = "auth_blocked"
         except netgear_auth.CannotConnect:
+            _LOGGER.warning(
+                "Meural: Cannot connect to Netgear authentication services "
+                "finishing mobile sign-in"
+            )
             errors["base"] = "cannot_connect"
         except netgear_auth.InvalidAuth:
+            _LOGGER.warning(
+                "Meural: Mobile sign-in token was rejected as invalid or expired"
+            )
             errors["base"] = "invalid_auth"
         except Exception:  # pylint: disable=broad-except
-            _LOGGER.exception("Unexpected exception finishing mobile Meural sign-in")
+            _LOGGER.exception("Meural: Unexpected exception finishing mobile sign-in")
             errors["base"] = "unknown"
 
         return self.async_show_form(
@@ -194,6 +206,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         errors: dict[str, str] = {}
         if user_input is not None:
+            _LOGGER.debug(
+                "Meural: Submitting response to challenge %s",
+                self._pending_challenge.name,
+            )
             try:
                 result = await self._authenticator.complete_challenge(
                     self._pending_challenge,
@@ -201,17 +217,33 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 return await self._finish_authentication(result)
             except netgear_auth.ChallengeRequired as err:
+                _LOGGER.info(
+                    "Meural: Netgear requires a further challenge (%s)",
+                    err.challenge.name,
+                )
                 self._pending_challenge = err.challenge
             except netgear_auth.InvalidChallenge:
+                _LOGGER.warning(
+                    "Meural: Verification code rejected as invalid or expired"
+                )
                 errors["base"] = "invalid_code"
             except netgear_auth.AuthenticationBlocked:
+                _LOGGER.warning(
+                    "Meural: Netgear WAF blocked authentication during challenge"
+                )
                 errors["base"] = "auth_blocked"
             except netgear_auth.CannotConnect:
+                _LOGGER.warning("Meural: Cannot connect to Netgear authentication services")
                 errors["base"] = "cannot_connect"
             except netgear_auth.InvalidAuth:
+                _LOGGER.warning(
+                    "Meural: Authentication session became invalid during challenge"
+                )
                 errors["base"] = "invalid_auth"
             except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception completing Meural challenge")
+                _LOGGER.exception(
+                    "Meural: Unexpected exception completing authentication challenge"
+                )
                 errors["base"] = "unknown"
 
         challenge = self._pending_challenge
@@ -232,27 +264,31 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str],
     ) -> FlowResult | None:
         """Start login and route to a challenge form when Netgear requires it."""
-        self._password = password
         try:
             self._authenticator = netgear_auth.NetgearAuthenticator(
                 async_get_clientsession(self.hass),
+                self._trust_id,
             )
             result = await self._authenticator.authenticate(email, password)
             return await self._finish_authentication(result)
         except netgear_auth.ChallengeRequired as err:
+            _LOGGER.info(
+                "Meural: Netgear requires an interactive challenge (%s)",
+                err.challenge.name,
+            )
             self._pending_challenge = err.challenge
             return await self.async_step_challenge()
         except netgear_auth.AuthenticationBlocked:
-            _LOGGER.warning("Netgear WAF blocked Meural authentication")
+            _LOGGER.warning("Meural: Netgear WAF blocked authentication")
             errors["base"] = "auth_blocked"
         except netgear_auth.CannotConnect:
-            _LOGGER.warning("Cannot connect to Netgear authentication services")
+            _LOGGER.warning("Meural: Cannot connect to Netgear authentication services")
             errors["base"] = "cannot_connect"
         except netgear_auth.InvalidAuth:
-            _LOGGER.warning("Invalid credentials for Meural account %s", email)
+            _LOGGER.warning("Meural: Invalid credentials for account %s", email)
             errors["base"] = "invalid_auth"
         except Exception:  # pylint: disable=broad-except
-            _LOGGER.exception("Unexpected exception authenticating Meural account")
+            _LOGGER.exception("Meural: Unexpected exception authenticating account")
             errors["base"] = "unknown"
         return None
 
@@ -269,20 +305,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "expires_at": result.expires_at,
             "trust_id": result.trust_id,
         }
-        if self._password is not None:
-            # Retained only for rollback compatibility with v2.3.x.
-            data[CONF_PASSWORD] = self._password
+        # A completed login proves authentication works again, so any backoff
+        # recorded under this trust_id from earlier refresh failures must not
+        # delay the first token refresh after (re)authentication.
+        reset_auth_backoff(result.trust_id)
 
         await self.async_set_unique_id(self._email, raise_on_progress=False)
         if self.source == config_entries.SOURCE_REAUTH:
             self._abort_if_unique_id_mismatch(reason="wrong_account")
+            _LOGGER.info("Meural: Successfully reauthenticated account %s", self._email)
             return self.async_update_reload_and_abort(
                 self._get_reauth_entry(),
                 data=data,
             )
 
         self._abort_if_unique_id_configured()
-        _LOGGER.info("Successfully authenticated Meural account %s", self._email)
+        _LOGGER.info("Meural: Successfully authenticated account %s", self._email)
         return self.async_create_entry(title=self._email, data=data)
 
     @staticmethod

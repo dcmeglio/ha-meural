@@ -12,7 +12,9 @@ from aiohttp.client_exceptions import ClientResponseError
 from homeassistant.exceptions import HomeAssistantError
 
 from .netgear_auth import (
+    AuthenticationBlocked,
     AuthResult,
+    CannotConnect,
     InvalidAuth,
     NetgearAuthenticator,
 )
@@ -22,6 +24,51 @@ _LOGGER = logging.getLogger(__name__)
 BASE_URL = "https://api.meural.com/v1/"
 LOCAL_READ_ATTEMPTS = 2
 LOCAL_RETRY_DELAY = 0.25
+
+# Backoff before retrying a token refresh after a failure, to avoid hammering the
+# auth endpoint (e.g. during an upstream WAF/rate-limit block). Doubles on each
+# consecutive failure up to the cap, and resets after a success.
+AUTH_RETRY_BACKOFF_BASE = 60
+AUTH_RETRY_BACKOFF_MAX = 1800
+
+
+def _auth_backoff_seconds(failure_count: int) -> float:
+    """Return the backoff duration for the given number of consecutive auth failures."""
+    return min(AUTH_RETRY_BACKOFF_BASE * (2 ** (failure_count - 1)), AUTH_RETRY_BACKOFF_MAX)
+
+
+# Auth backoff state keyed by trust_id (or, until one is known, by config entry
+# ID), kept at module scope (rather than on PyMeural instances) so it survives
+# Home Assistant recreating the PyMeural instance on every ConfigEntryNotReady
+# setup retry - otherwise a sustained upstream block (e.g. WAF) would keep
+# resetting the backoff and get hit on every retry. Resets naturally on a full
+# Home Assistant restart. PyMeural no longer carries a username/password (auth
+# is centralized in the config flow), so trust_id - persisted across instance
+# recreation via the config entry - is the durable key instead. A config entry
+# created before trust_id existed won't have one until its first successful
+# refresh, so entry_id (always present) is the fallback key for that window -
+# never a single shared bucket, which would let one such account's failures
+# throttle every other account that also lacks a trust_id.
+_AUTH_BACKOFF_STATE: dict[str, dict[str, Any]] = {}
+
+
+def _get_auth_backoff_state(key: str) -> dict[str, Any]:
+    return _AUTH_BACKOFF_STATE.setdefault(
+        key, {"last_failure": 0.0, "failure_count": 0, "error_type": CannotConnect}
+    )
+
+
+def reset_auth_backoff(trust_id: str) -> None:
+    """Clear auth backoff state after a successful interactive login.
+
+    A completed config/reauth flow proves authentication works again, so any
+    backoff recorded from earlier refresh failures under this trust_id must not
+    delay the first token refresh after reauthentication.
+    """
+    if _AUTH_BACKOFF_STATE.pop(trust_id, None) is not None:
+        _LOGGER.debug(
+            "Meural: Cleared authentication backoff state after interactive login"
+        )
 
 
 async def authenticate(
@@ -55,6 +102,7 @@ class PyMeural:
         token: str | None,
         token_update_callback: Callable[[str, str, float, str], None],
         session: aiohttp.ClientSession,
+        entry_id: str,
         refresh_token: str | None = None,
         expires_at: float | None = None,
         trust_id: str | None = None,
@@ -65,8 +113,19 @@ class PyMeural:
         self.refresh_token = refresh_token
         self.expires_at = expires_at
         self.trust_id = trust_id
+        self._entry_id = entry_id
         self.token_update_callback = token_update_callback
         self._auth_lock = asyncio.Lock()
+
+    @property
+    def _backoff_key(self) -> str:
+        """Return the durable key for this account's auth backoff state.
+
+        Uses trust_id once known; falls back to the config entry ID for
+        entries that predate trust_id (before their first successful refresh),
+        so those entries don't share a single global backoff bucket.
+        """
+        return self.trust_id or f"entry:{self._entry_id}"
 
     async def request(
         self, method: str, path: str, data: dict[str, Any] | None = None
@@ -79,6 +138,7 @@ class PyMeural:
             else:
                 kwargs["json"] = data
         if self.token and self.expires_at and self.expires_at <= time.time() + 60:
+            _LOGGER.debug("Meural: Access token is about to expire, refreshing proactively")
             self.token = None
 
         for attempt in range(2):
@@ -87,7 +147,7 @@ class PyMeural:
 
             async with asyncio.timeout(10):
                 try:
-                    resp = await self.session.request(
+                    async with self.session.request(
                         method,
                         url,
                         headers={
@@ -98,11 +158,12 @@ class PyMeural:
                         },
                         raise_for_status=True,
                         **kwargs,
-                    )
-                    response = await resp.json(content_type=None)
+                    ) as resp:
+                        response = await resp.json(content_type=None)
                     return response.get("data", response)
                 except ClientResponseError as err:
                     if err.status != 401:
+                        _LOGGER.error("Meural: Cloud request failed: %s", err)
                         raise
                     self.token = None
                     self.expires_at = None
@@ -129,11 +190,54 @@ class PyMeural:
             if not self.refresh_token:
                 raise InvalidAuth("No Meural refresh token is available")
 
-            result = await refresh_access_token(
-                self.session,
-                self.refresh_token,
-                self.trust_id,
-            )
+            # Back off after a recent failure instead of hammering the auth endpoint
+            # on every subsequent request (e.g. while an upstream WAF/rate-limit
+            # block is in effect). Backoff doubles with each consecutive failure.
+            backoff_state = _get_auth_backoff_state(self._backoff_key)
+            if backoff_state["last_failure"]:
+                backoff = _auth_backoff_seconds(backoff_state["failure_count"])
+                time_since_failure = time.monotonic() - backoff_state["last_failure"]
+                if time_since_failure < backoff:
+                    remaining = backoff - time_since_failure
+                    _LOGGER.debug(
+                        "Meural: Backing off authentication for %.0fs after %d consecutive failure(s)",
+                        remaining,
+                        backoff_state["failure_count"],
+                    )
+                    # Re-raise the same error type as the failure that caused this
+                    # backoff, so a WAF/network block still reports as CannotConnect
+                    # or AuthenticationBlocked rather than being misreported as bad
+                    # credentials.
+                    raise backoff_state["error_type"](
+                        f"Skipping authentication attempt, retrying in {remaining:.0f}s"
+                    )
+
+            try:
+                result = await refresh_access_token(
+                    self.session,
+                    self.refresh_token,
+                    self.trust_id,
+                )
+            except (InvalidAuth, CannotConnect, AuthenticationBlocked) as err:
+                backoff_state["last_failure"] = time.monotonic()
+                backoff_state["failure_count"] += 1
+                backoff_state["error_type"] = type(err)
+                _LOGGER.warning(
+                    "Meural: Authentication failed (%s: %s), backing off for %.0fs before retrying",
+                    type(err).__name__,
+                    err,
+                    _auth_backoff_seconds(backoff_state["failure_count"]),
+                )
+                raise
+
+            if backoff_state["failure_count"]:
+                _LOGGER.info(
+                    "Meural: Authentication recovered after %d failed attempt(s)",
+                    backoff_state["failure_count"],
+                )
+            backoff_state["last_failure"] = 0.0
+            backoff_state["failure_count"] = 0
+
             self.token = result.access_token
             self.refresh_token = result.refresh_token
             self.expires_at = result.expires_at
@@ -239,12 +343,19 @@ class LocalMeural:
         attempts = LOCAL_READ_ATTEMPTS if is_safe_read else 1
 
         for attempt in range(attempts):
+            # Safe reads get a retry, so their first attempt can cheaply reuse the
+            # pooled keep-alive connection: if the Canvas has since reset it, that
+            # attempt fails fast and the retry below asks for a fresh connection
+            # instead of hitting the same reset one. Writes get only one attempt,
+            # so they always request a fresh connection up front rather than risk
+            # silently failing against a connection the Canvas has since reset.
+            headers = {} if (is_safe_read and attempt == 0) else {"Connection": "close"}
             try:
                 async with asyncio.timeout(10):
                     async with self.session.request(
                         method,
                         url,
-                        headers={"Connection": "close"},
+                        headers=headers,
                         raise_for_status=True,
                         **kwargs,
                     ) as resp:

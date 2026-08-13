@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,13 +14,20 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, LOCAL_UPDATE_INTERVAL
 from .coordinator import CloudDataUpdateCoordinator, LocalDataUpdateCoordinator
+from .entity import MeuralDeviceInfoMixin
 
 _LOGGER = logging.getLogger(__name__)
 
 ORIENTATION_PORTRAIT = "portrait"
 ORIENTATION_LANDSCAPE = "landscape"
+
+# How long to trust an unconfirmed optimistic orientation before falling back to
+# the last value the local coordinator actually reported. Bounds how long the
+# entity can show a stale value if the Canvas accepts the command but never
+# applies it, while still giving the device a few poll cycles to catch up.
+ORIENTATION_OPTIMISTIC_TIMEOUT = LOCAL_UPDATE_INTERVAL * 3
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -59,7 +66,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up Meural select entities."""
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
-    meural = entry_data["meural"]
     cloud_coordinator: CloudDataUpdateCoordinator = entry_data["cloud_coordinator"]
     local_coordinators: dict[str, LocalDataUpdateCoordinator] = entry_data[
         "local_coordinators"
@@ -79,7 +85,6 @@ async def async_setup_entry(
                 continue
             entities.append(
                 MeuralSettingSelect(
-                    meural,
                     cloud_coordinator,
                     device,
                     description,
@@ -90,7 +95,7 @@ async def async_setup_entry(
 
 
 class MeuralDisplayOrientationSelect(
-    CoordinatorEntity[LocalDataUpdateCoordinator], SelectEntity
+    MeuralDeviceInfoMixin, CoordinatorEntity[LocalDataUpdateCoordinator], SelectEntity
 ):
     """Configured display orientation of a Meural Canvas device."""
 
@@ -109,22 +114,26 @@ class MeuralDisplayOrientationSelect(
         self._attr_name = f"{device['alias']} Display Orientation"
         self._attr_unique_id = f"{device['id']}_display_orientation"
         self._optimistic_option: str | None = None
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        """Return device information to link this entity to the Meural device."""
-        return {"identifiers": {(DOMAIN, self._device["productKey"])}}
+        self._optimistic_since: float = 0.0
 
     def _handle_coordinator_update(self) -> None:
-        """Clear the optimistic option after the local coordinator updates."""
-        self._optimistic_option = None
+        """Clear the optimistic option once a poll confirms it, matching sibling
+        entities' pattern of trusting the next scheduled poll rather than a
+        blocking refresh. A poll landing before the device applies the change
+        leaves the optimistic value in place instead of flashing back to stale
+        data. If the device never reports the change (e.g. it silently rejected
+        it), fall back to the reported value after a bounded timeout instead of
+        showing the unconfirmed value forever.
+        """
+        if self._optimistic_option is not None and (
+            self._reported_option() == self._optimistic_option
+            or time.monotonic() - self._optimistic_since > ORIENTATION_OPTIMISTIC_TIMEOUT
+        ):
+            self._optimistic_option = None
         super()._handle_coordinator_update()
 
-    @property
-    def current_option(self) -> str | None:
-        """Return the configured display orientation."""
-        if self._optimistic_option is not None:
-            return self._optimistic_option
+    def _reported_option(self) -> str | None:
+        """Return the orientation as last reported by the local coordinator."""
         if not self.coordinator.data:
             return None
         value = str(self.coordinator.data.get("orientation", "")).lower()
@@ -134,6 +143,13 @@ class MeuralDisplayOrientationSelect(
             "landscape": ORIENTATION_LANDSCAPE,
             "horizontal": ORIENTATION_LANDSCAPE,
         }.get(value)
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the configured display orientation."""
+        if self._optimistic_option is not None:
+            return self._optimistic_option
+        return self._reported_option()
 
     async def async_select_option(self, option: str) -> None:
         """Set the display orientation through the local Canvas API."""
@@ -147,26 +163,25 @@ class MeuralDisplayOrientationSelect(
         else:
             await self.coordinator.local_meural.send_set_landscape()
         self._optimistic_option = option
+        self._optimistic_since = time.monotonic()
         self.async_write_ha_state()
-        await asyncio.sleep(0.5)
-        await self.coordinator.async_refresh()
 
 
-class MeuralSettingSelect(CoordinatorEntity[CloudDataUpdateCoordinator], SelectEntity):
+class MeuralSettingSelect(
+    MeuralDeviceInfoMixin, CoordinatorEntity[CloudDataUpdateCoordinator], SelectEntity
+):
     """Select-style cloud setting for a Meural Canvas device."""
 
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
-        meural: Any,
         coordinator: CloudDataUpdateCoordinator,
         device: dict[str, Any],
         description: MeuralSelectDescription,
     ) -> None:
         """Initialize the select entity."""
         super().__init__(coordinator)
-        self.meural = meural
         self._device = device
         self._device_id = str(device["id"])
         self._description = description
@@ -174,11 +189,6 @@ class MeuralSettingSelect(CoordinatorEntity[CloudDataUpdateCoordinator], SelectE
         self._attr_unique_id = f"{device['id']}_{description.unique_suffix}"
         self._attr_icon = description.icon
         self._attr_options = list(description.options)
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        """Return device information to link this entity to the Meural device."""
-        return {"identifiers": {(DOMAIN, self._device["productKey"])}}
 
     @property
     def current_option(self) -> str | None:
@@ -210,12 +220,6 @@ class MeuralSettingSelect(CoordinatorEntity[CloudDataUpdateCoordinator], SelectE
             self._description.key,
             option,
         )
-        await self.meural.update_device(
-            self._device_id, {self._description.key: option}
+        await self.coordinator.async_apply_device_setting(
+            self._device_id, self._description.key, option
         )
-
-        if self.coordinator.data:
-            device = self.coordinator.data.get("devices", {}).get(self._device_id)
-            if device is not None:
-                device[self._description.key] = option
-                self.coordinator.async_set_updated_data(self.coordinator.data)

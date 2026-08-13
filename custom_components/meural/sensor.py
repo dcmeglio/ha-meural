@@ -25,6 +25,7 @@ from homeassistant.util.dt import parse_datetime
 
 from .const import DOMAIN
 from .coordinator import CloudDataUpdateCoordinator, LocalDataUpdateCoordinator
+from .entity import MeuralDeviceInfoMixin
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ async def async_setup_entry(
 
 
 class MeuralCloudSensorBase(
-    CoordinatorEntity[CloudDataUpdateCoordinator], SensorEntity
+    MeuralDeviceInfoMixin, CoordinatorEntity[CloudDataUpdateCoordinator], SensorEntity
 ):
     """Base class for Meural cloud-sourced sensor entities."""
 
@@ -70,15 +71,10 @@ class MeuralCloudSensorBase(
         super().__init__(coordinator)
         self._device = device
 
-    @property
-    def device_info(self) -> dict[str, Any]:
-        """Return device information to link this entity to the Meural device."""
-        return {
-            "identifiers": {(DOMAIN, self._device["productKey"])},
-        }
 
-
-class MeuralSensorBase(CoordinatorEntity[LocalDataUpdateCoordinator], SensorEntity):
+class MeuralSensorBase(
+    MeuralDeviceInfoMixin, CoordinatorEntity[LocalDataUpdateCoordinator], SensorEntity
+):
     """Base class for Meural sensor entities."""
 
     def __init__(
@@ -89,13 +85,6 @@ class MeuralSensorBase(CoordinatorEntity[LocalDataUpdateCoordinator], SensorEnti
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._device = device
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        """Return device information to link this entity to the Meural device."""
-        return {
-            "identifiers": {(DOMAIN, self._device["productKey"])},
-        }
 
 
 class MeuralLuxSensor(MeuralSensorBase):

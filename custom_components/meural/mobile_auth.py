@@ -18,7 +18,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
 from .const import DOMAIN
-from .netgear_auth import COGNITO_CLIENT_ID, COGNITO_URL
+from .netgear_auth import (
+    COGNITO_CLIENT_ID,
+    COGNITO_URL,
+    PASSWORD_CHALLENGE_EXCLUSION_KEYWORDS,
+    RESPONSE_KEY_MAP,
+    USER_MIGRATION_KEYWORDS,
+    WAF_BLOCK_PAGE_KEYWORDS,
+    WAF_ERROR_KEYWORDS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,14 +46,21 @@ class MobileAuthSession:
     state: str
     origin: str
     expires_at: float
+    trust_id: str | None = None
 
 
 def create_mobile_auth_url(
     hass: HomeAssistant,
     flow_id: str,
     frontend_base: str,
+    trust_id: str | None = None,
 ) -> str:
-    """Register a pending handoff and return its one-time browser URL."""
+    """Register a pending handoff and return its one-time browser URL.
+
+    `trust_id`, when supplied, is the config entry's already-trusted device
+    identifier (e.g. during reauth) so NETGEAR recognizes this install as
+    known instead of treating the browser handoff as a brand-new device.
+    """
     domain_data = hass.data.setdefault(DOMAIN, {})
     sessions: dict[str, MobileAuthSession] = domain_data.setdefault(_DATA_SESSIONS, {})
     now = time.monotonic()
@@ -72,6 +87,7 @@ def create_mobile_auth_url(
         state=state,
         origin=origin,
         expires_at=now + MOBILE_AUTH_TIMEOUT,
+        trust_id=trust_id,
     )
     path = AUTH_CALLBACK_PATH.format(flow_id=quote(flow_id, safe=""))
     return f"{origin}{path}?state={quote(state, safe='')}"
@@ -95,7 +111,7 @@ class MeuralMobileAuthView(HomeAssistantView):
 
         nonce = secrets.token_urlsafe(24)
         return web.Response(
-            text=_mobile_login_html(nonce),
+            text=_mobile_login_html(nonce, session.trust_id),
             content_type="text/html",
             charset="utf-8",
             headers=_security_headers(nonce),
@@ -112,6 +128,9 @@ class MeuralMobileAuthView(HomeAssistantView):
             )
 
         if request.headers.get("Origin", "").rstrip("/") != session.origin:
+            _LOGGER.warning(
+                "Meural: Mobile sign-in response came from an unexpected origin"
+            )
             return web.json_response(
                 {"error": "The sign-in response came from an unexpected origin."},
                 status=web.HTTPForbidden.status_code,
@@ -158,7 +177,7 @@ class MeuralMobileAuthView(HomeAssistantView):
                 user_input=validated,
             )
         except Exception:  # pylint: disable=broad-except
-            _LOGGER.exception("Could not resume the Meural mobile sign-in flow")
+            _LOGGER.exception("Meural: Could not resume the mobile sign-in flow")
             return web.json_response(
                 {"error": "Home Assistant could not resume the sign-in flow."},
                 status=web.HTTPBadRequest.status_code,
@@ -166,12 +185,17 @@ class MeuralMobileAuthView(HomeAssistantView):
             )
 
         if result["type"] is not FlowResultType.EXTERNAL_STEP_DONE:
+            _LOGGER.debug(
+                "Meural: Mobile sign-in flow was no longer active when the "
+                "browser handoff arrived"
+            )
             return web.json_response(
                 {"error": "The Home Assistant sign-in flow is no longer active."},
                 status=web.HTTPBadRequest.status_code,
                 headers={"Cache-Control": "no-store"},
             )
 
+        _LOGGER.debug("Meural: Mobile sign-in handoff delivered to Home Assistant")
         return web.json_response(
             {"status": "ok"},
             headers={"Cache-Control": "no-store"},
@@ -194,6 +218,7 @@ class MeuralMobileAuthView(HomeAssistantView):
             or not secrets.compare_digest(session.flow_id, flow_id)
             or session.expires_at <= time.monotonic()
         ):
+            _LOGGER.debug("Meural: Mobile sign-in session is invalid or expired")
             if session is not None:
                 sessions.pop(state, None)
             return None
@@ -267,10 +292,23 @@ def _security_headers(nonce: str) -> dict[str, str]:
     }
 
 
-def _mobile_login_html(nonce: str) -> str:
+def _mobile_login_html(nonce: str, trust_id: str | None) -> str:
     """Build the standalone page; credentials never leave its browser context."""
     client_id = json.dumps(COGNITO_CLIENT_ID)
     cognito_url = json.dumps(COGNITO_URL)
+    existing_trust_id = json.dumps(trust_id)
+    # Sourced from netgear_auth.py's constants (see the comment there) so this
+    # embedded browser-side copy of the Cognito challenge logic can't drift
+    # from the Python implementation's data, even though the control flow
+    # around it still has to be duplicated since this must run standalone in
+    # a phone's browser rather than calling back into Home Assistant.
+    response_key_map = json.dumps(RESPONSE_KEY_MAP)
+    password_challenge_exclusion_keywords = json.dumps(
+        list(PASSWORD_CHALLENGE_EXCLUSION_KEYWORDS)
+    )
+    waf_error_keywords = json.dumps(list(WAF_ERROR_KEYWORDS))
+    waf_block_page_keywords = json.dumps(list(WAF_BLOCK_PAGE_KEYWORDS))
+    user_migration_keywords = json.dumps(list(USER_MIGRATION_KEYWORDS))
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -328,6 +366,12 @@ def _mobile_login_html(nonce: str) -> str:
 "use strict";
 const COGNITO_CLIENT_ID = {client_id};
 const COGNITO_URL = {cognito_url};
+const EXISTING_TRUST_ID = {existing_trust_id};
+const RESPONSE_KEY_MAP = {response_key_map};
+const PASSWORD_CHALLENGE_EXCLUSION_KEYWORDS = {password_challenge_exclusion_keywords};
+const WAF_ERROR_KEYWORDS = {waf_error_keywords};
+const WAF_BLOCK_PAGE_KEYWORDS = {waf_block_page_keywords};
+const USER_MIGRATION_KEYWORDS = {user_migration_keywords};
 const loginForm = document.getElementById("login-form");
 const codeForm = document.getElementById("code-form");
 const loginButton = document.getElementById("login-button");
@@ -386,6 +430,7 @@ async function cognitoCall(target, payload) {{
   if (!response.ok) {{
     const failure = new Error(String(body.message || body.Message || "NETGEAR rejected the sign-in."));
     failure.details = JSON.stringify(body).toLowerCase();
+    failure.status = response.status;
     throw failure;
   }}
   return body;
@@ -404,7 +449,8 @@ async function initiate() {{
       ClientMetadata: metadata()
     }});
   }} catch (error) {{
-    if (!String(error.details || "").includes("user_not_found")) throw error;
+    const details = String(error.details || "");
+    if (!USER_MIGRATION_KEYWORDS.some(keyword => details.includes(keyword))) throw error;
     return cognitoCall("InitiateAuth", {{
       AuthFlow: "USER_PASSWORD_AUTH",
       ClientId: COGNITO_CLIENT_ID,
@@ -415,18 +461,13 @@ async function initiate() {{
 }}
 
 function responseKey(name) {{
-  const keys = {{
-    EMAIL_MFA: "EMAIL_MFA_CODE", EMAIL_OTP: "EMAIL_OTP_CODE",
-    SMS_MFA: "SMS_MFA_CODE", SMS_OTP: "SMS_OTP_CODE",
-    SOFTWARE_TOKEN_MFA: "SOFTWARE_TOKEN_MFA_CODE",
-    NEW_PASSWORD_REQUIRED: "NEW_PASSWORD"
-  }};
-  return keys[name] || "ANSWER";
+  return RESPONSE_KEY_MAP[name] || "ANSWER";
 }}
 
 function passwordAnswersChallenge(name, parameters, attempt) {{
   if (name !== "CUSTOM_CHALLENGE" || attempt !== 1) return false;
-  return !/(otp|verification|email|phone|code)/.test(JSON.stringify(parameters || {{}}).toLowerCase());
+  const description = JSON.stringify(parameters || {{}}).toLowerCase();
+  return !PASSWORD_CHALLENGE_EXCLUSION_KEYWORDS.some(keyword => description.includes(keyword));
 }}
 
 async function respond(challenge, answer) {{
@@ -485,10 +526,15 @@ async function processResponse(response, attempt = 0) {{
   document.getElementById("done").style.display = "block";
 }}
 
+function isWafError(error) {{
+  const details = String(error.details || "");
+  if (WAF_ERROR_KEYWORDS.some(keyword => details.includes(keyword))) return true;
+  return error.status === 403 && WAF_BLOCK_PAGE_KEYWORDS.some(keyword => details.includes(keyword));
+}}
+
 function showFailure(error) {{
   setBusy(false);
-  const details = String(error.details || "");
-  if (details.includes("forbiddenexception") || details.includes("waf block")) {{
+  if (isWafError(error)) {{
     setStatus("NETGEAR also blocked this mobile connection. Confirm Wi-Fi is off and retry later.", true);
   }} else {{
     setStatus(String(error.message || "Sign-in failed."), true);
@@ -499,7 +545,7 @@ loginForm.addEventListener("submit", async (event) => {{
   event.preventDefault();
   currentEmail = emailInput.value.trim();
   currentPassword = passwordInput.value;
-  trustId = newTrustId();
+  trustId = EXISTING_TRUST_ID || newTrustId();
   pending = null;
   setBusy(true);
   setStatus("Contacting NETGEAR…");

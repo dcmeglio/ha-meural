@@ -5,6 +5,27 @@ All notable changes to the ha-meural Home Assistant integration will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Fixed a connection leak in `PyMeural.request()`: the cloud API response was never used as a context manager, so the underlying connection was never released back to the pool.
+- `expires_in: 0` and a JWT `exp` claim of `0` in a token response are no longer silently replaced with a 1-hour fallback expiry, which could keep an already-expired token in use.
+- NETGEAR's CloudFront/WAF block is now also detected when it answers with an HTML block page instead of a JSON error body.
+- A WAF block or 5xx/429 response while refreshing a token or submitting a challenge answer is no longer misreported as invalid credentials, so it no longer forces an unnecessary reauth.
+- `async_refresh_galleries()` now also treats a WAF/auth block as a recoverable error, matching the regular device-settings poll, instead of raising it unhandled from integration setup, the `synchronize` service, and the media browser.
+- Restored a compatibility shim (`async_step_reauth_confirm`) for reauth flows that were already open in the Home Assistant frontend before this update installs.
+
+### Added
+- Added exponential backoff (60s, doubling up to a 30-minute cap) before retrying a failed cloud token refresh, keyed per account (`trust_id`, falling back to the config entry ID before one is known) so a sustained WAF block or outage doesn't hammer NETGEAR's auth endpoint. Resets automatically after a successful reauthentication.
+- Reauthentication now reuses the config entry's existing `trust_id`, so NETGEAR recognizes the device as already-trusted and typically skips a fresh OTP/MFA challenge.
+
+### Changed
+- The account password is no longer persisted in the config entry after login — it was kept only for v2.3.x rollback compatibility, which is now dropped. Existing config entries have any stored password scrubbed automatically on the next Home Assistant restart.
+- The local Canvas HTTP client now reuses its pooled keep-alive connection for the first attempt of a safe (retryable) read instead of always requesting a fresh connection.
+- The display orientation select entity's optimistic state now falls back to the last value reported by the local coordinator after a bounded timeout (3 poll intervals) if the device never confirms the change, instead of blocking on a fixed 0.5s sleep and forced refresh after every change.
+- Extracted the repeated `device_info` property into a shared `MeuralDeviceInfoMixin` (new `entity.py`), used by the light, number, select, sensor, and switch entities.
+- Consolidated the repeated "update the cloud setting, then optimistically patch the coordinator's cached device data" logic into `CloudDataUpdateCoordinator.async_apply_device_setting()`, used by the number, select, and switch entities.
+
 ## [2.4.2-beta.1] - 2026-08-13
 
 ### Changed

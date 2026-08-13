@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import CloudDataUpdateCoordinator
+from .entity import MeuralDeviceInfoMixin
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -60,7 +61,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up Meural switch entities."""
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
-    meural = entry_data["meural"]
     cloud_coordinator: CloudDataUpdateCoordinator = entry_data["cloud_coordinator"]
 
     entities = []
@@ -80,7 +80,6 @@ async def async_setup_entry(
             )
             entities.append(
                 MeuralSettingSwitch(
-                    meural,
                     cloud_coordinator,
                     device,
                     description,
@@ -90,19 +89,19 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MeuralSettingSwitch(CoordinatorEntity[CloudDataUpdateCoordinator], SwitchEntity):
+class MeuralSettingSwitch(
+    MeuralDeviceInfoMixin, CoordinatorEntity[CloudDataUpdateCoordinator], SwitchEntity
+):
     """Boolean cloud setting for a Meural Canvas device."""
 
     def __init__(
         self,
-        meural: Any,
         coordinator: CloudDataUpdateCoordinator,
         device: dict[str, Any],
         description: MeuralSwitchDescription,
     ) -> None:
         """Initialize the switch."""
         super().__init__(coordinator)
-        self.meural = meural
         self._device = device
         self._device_id = str(device["id"])
         self._description = description
@@ -110,13 +109,6 @@ class MeuralSettingSwitch(CoordinatorEntity[CloudDataUpdateCoordinator], SwitchE
         self._attr_unique_id = f"{device['id']}_{description.unique_suffix}"
         self._attr_icon = description.icon
         self._attr_entity_category = description.entity_category
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        """Return device information to link this entity to the Meural device."""
-        return {
-            "identifiers": {(DOMAIN, self._device["productKey"])},
-        }
 
     @property
     def is_on(self) -> bool | None:
@@ -147,12 +139,6 @@ class MeuralSettingSwitch(CoordinatorEntity[CloudDataUpdateCoordinator], SwitchE
             self._description.key,
             enabled,
         )
-        await self.meural.update_device(
-            self._device_id, {self._description.key: enabled}
+        await self.coordinator.async_apply_device_setting(
+            self._device_id, self._description.key, enabled
         )
-
-        if self.coordinator.data:
-            device = self.coordinator.data.get("devices", {}).get(self._device_id)
-            if device is not None:
-                device[self._description.key] = enabled
-                self.coordinator.async_set_updated_data(self.coordinator.data)

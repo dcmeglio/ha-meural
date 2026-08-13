@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import time
 import unittest
 from pathlib import Path
 from typing import Any, Self
@@ -152,6 +153,61 @@ class NetgearAuthenticatorTest(unittest.IsolatedAsyncioTestCase):
             session.requests[2]["json"]["ChallengeResponses"]["ANSWER"],
         )
 
+    async def test_challenge_transient_server_error_is_cannot_connect(self) -> None:
+        """A 5xx while submitting a challenge answer must not read as a bad code."""
+        otp_response = FakeResponse(
+            {
+                "ChallengeName": "CUSTOM_CHALLENGE",
+                "ChallengeParameters": {"prompt": "email verification code"},
+                "Session": "otp-session",
+            }
+        )
+        session = FakeSession(password_challenge(), otp_response)
+        authenticator = auth.NetgearAuthenticator(session, "trust-id")
+        with self.assertRaises(auth.ChallengeRequired) as raised:
+            await authenticator.authenticate("person@example.com", "secret")
+
+        session.responses.append(
+            FakeResponse({"message": "Internal server error"}, status=503)
+        )
+        with self.assertRaises(auth.CannotConnect):
+            await authenticator.complete_challenge(
+                raised.exception.challenge, "123456"
+            )
+
+    async def test_cloudfront_html_block_page_is_waf_error(self) -> None:
+        """CloudFront answers a block with an HTML page, not a JSON error body."""
+        session = FakeSession(
+            FakeResponse(
+                "<html><body>Request blocked by CloudFront</body></html>",
+                status=403,
+            )
+        )
+        authenticator = auth.NetgearAuthenticator(session, "trust-id")
+
+        with self.assertRaises(auth.AuthenticationBlocked):
+            await authenticator.authenticate("person@example.com", "secret")
+
+    async def test_migration_detected_via_cognito_exception_name(self) -> None:
+        """Cognito's own UserNotFoundException serialization must also fall back."""
+        session = FakeSession(
+            FakeResponse(
+                {"__type": "UserNotFoundException", "message": "not found"},
+                status=400,
+            ),
+            cognito_success(),
+            authorize_success(),
+            meural_token_success(),
+        )
+        authenticator = auth.NetgearAuthenticator(session, "trust-id")
+
+        await authenticator.authenticate("person@example.com", "secret")
+
+        self.assertEqual(
+            "USER_PASSWORD_AUTH",
+            session.requests[1]["json"]["AuthFlow"],
+        )
+
     async def test_browser_cognito_token_exchange(self) -> None:
         """A browser-obtained Cognito token can finish on Home Assistant."""
         session = FakeSession(authorize_success(), meural_token_success())
@@ -252,6 +308,33 @@ class NetgearAuthenticatorTest(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(auth.InvalidAuth):
             await authenticator.refresh("expired-refresh-token")
+
+    async def test_waf_block_on_refresh_is_not_reported_as_invalid_auth(self) -> None:
+        """A WAF block on the background refresh call must not force reauth."""
+        session = FakeSession(
+            FakeResponse(
+                {
+                    "__type": "ForbiddenException",
+                    "message": "Request not allowed due to WAF block.",
+                },
+                status=403,
+            )
+        )
+        authenticator = auth.NetgearAuthenticator(session, "trust-id")
+
+        with self.assertRaises(auth.AuthenticationBlocked):
+            await authenticator.refresh("existing-refresh-token")
+
+    async def test_refresh_treats_zero_expires_in_as_expired(self) -> None:
+        """expires_in: 0 must not be silently substituted with a 1-hour fallback."""
+        session = FakeSession(
+            FakeResponse({"access_token": "rotated-access-token", "expires_in": 0})
+        )
+        authenticator = auth.NetgearAuthenticator(session, "trust-id")
+
+        result = await authenticator.refresh("existing-refresh-token")
+
+        self.assertLessEqual(result.expires_at, time.time())
 
 
 if __name__ == "__main__":

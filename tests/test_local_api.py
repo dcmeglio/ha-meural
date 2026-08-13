@@ -102,7 +102,8 @@ class LocalMeuralRequestTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(sleeping)
         self.assertEqual(2, len(session.requests))
-        self.assertEqual("close", session.requests[0]["headers"]["Connection"])
+        self.assertNotIn("Connection", session.requests[0]["headers"])
+        self.assertEqual("close", session.requests[1]["headers"]["Connection"])
 
     async def test_safe_read_raises_after_second_interruption(self) -> None:
         session = FakeSession(
