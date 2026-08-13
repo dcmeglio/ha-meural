@@ -5,6 +5,23 @@ All notable changes to the ha-meural Home Assistant integration will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.2-beta.1] - 2026-08-13
+
+### Changed
+- Merged the current upstream `master` branch, including the official v2.4.1 Home Assistant 2026.8 compatibility update.
+- Updated the `boto3` requirement to `>=1.42.97`, matching upstream v2.4.1 and Home Assistant 2026.8 dependency constraints.
+- Added upstream's current HACS validation workflow and simplified `hacs.json` metadata.
+
+### Preserved
+- Kept the browser-assisted mobile sign-in, current NETGEAR Accounts token flow, additional Canvas entities, local connection retries, and automatic local IP refresh from the previous fork betas.
+
+## [2.4.1] - 2026-08-05
+
+WARNING: Do not update to this version unless you are running Home Assistant 2026.8+
+
+### Fixed
+- Support for Home Assistant 2026.8+. The `boto3` requirement is now `>=1.42.97` to match the updated Home Assistant dependency constraints.
+
 ## [2.4.0-beta.8] - 2026-07-25
 
 ### Fixed

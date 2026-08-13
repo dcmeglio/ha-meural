@@ -131,8 +131,9 @@ The integration uses two DataUpdateCoordinators for efficient polling:
 
 ## Dependencies
 
+- **boto3>=1.42.97**: Retained from upstream v2.4.1 for Home Assistant 2026.8 dependency compatibility; the fork's interactive NETGEAR flow itself uses aiohttp
 - **aiohttp**: Async HTTP client (provided by Home Assistant)
-- Home Assistant 2024.1.0+ (DataUpdateCoordinator pattern)
+- Home Assistant 2026.8+ (upstream v2.4.1 dependency baseline)
 - Python 3.11+
 
 ## Custom Services

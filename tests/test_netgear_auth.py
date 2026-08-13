@@ -6,7 +6,7 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 MODULE_PATH = (
     Path(__file__).parents[1] / "custom_components" / "meural" / "netgear_auth.py"
@@ -25,7 +25,7 @@ class FakeResponse:
         self.body = body
         self.status = status
 
-    async def __aenter__(self) -> "FakeResponse":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, exc_type, exc, traceback) -> None:
