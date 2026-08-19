@@ -5,7 +5,7 @@ All notable changes to the ha-meural Home Assistant integration will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.5.0] - 2026-08-19
 
 ### Fixed
 - Fixed a connection leak in `PyMeural.request()`: the cloud API response was never used as a context manager, so the underlying connection was never released back to the pool.
