@@ -5,12 +5,113 @@ All notable changes to the ha-meural Home Assistant integration will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Fixed a connection leak in `PyMeural.request()`: the cloud API response was never used as a context manager, so the underlying connection was never released back to the pool.
+- `expires_in: 0` and a JWT `exp` claim of `0` in a token response are no longer silently replaced with a 1-hour fallback expiry, which could keep an already-expired token in use.
+- NETGEAR's CloudFront/WAF block is now also detected when it answers with an HTML block page instead of a JSON error body.
+- A WAF block or 5xx/429 response while refreshing a token or submitting a challenge answer is no longer misreported as invalid credentials, so it no longer forces an unnecessary reauth.
+- `async_refresh_galleries()` now also treats a WAF/auth block as a recoverable error, matching the regular device-settings poll, instead of raising it unhandled from integration setup, the `synchronize` service, and the media browser.
+- Restored a compatibility shim (`async_step_reauth_confirm`) for reauth flows that were already open in the Home Assistant frontend before this update installs.
+
+### Added
+- Added exponential backoff (60s, doubling up to a 30-minute cap) before retrying a failed cloud token refresh, keyed per account (`trust_id`, falling back to the config entry ID before one is known) so a sustained WAF block or outage doesn't hammer NETGEAR's auth endpoint. Resets automatically after a successful reauthentication.
+- Reauthentication now reuses the config entry's existing `trust_id`, so NETGEAR recognizes the device as already-trusted and typically skips a fresh OTP/MFA challenge.
+
+### Changed
+- The account password is no longer persisted in the config entry after login — it was kept only for v2.3.x rollback compatibility, which is now dropped. Existing config entries have any stored password scrubbed automatically on the next Home Assistant restart.
+- The local Canvas HTTP client now reuses its pooled keep-alive connection for the first attempt of a safe (retryable) read instead of always requesting a fresh connection.
+- The display orientation select entity's optimistic state now falls back to the last value reported by the local coordinator after a bounded timeout (3 poll intervals) if the device never confirms the change, instead of blocking on a fixed 0.5s sleep and forced refresh after every change.
+- Extracted the repeated `device_info` property into a shared `MeuralDeviceInfoMixin` (new `entity.py`), used by the light, number, select, sensor, and switch entities.
+- Consolidated the repeated "update the cloud setting, then optimistically patch the coordinator's cached device data" logic into `CloudDataUpdateCoordinator.async_apply_device_setting()`, used by the number, select, and switch entities.
+
+## [2.4.2-beta.1] - 2026-08-13
+
+### Changed
+- Merged the current upstream `master` branch, including the official v2.4.1 Home Assistant 2026.8 compatibility update.
+- Updated the `boto3` requirement to `>=1.42.97`, matching upstream v2.4.1 and Home Assistant 2026.8 dependency constraints.
+- Added upstream's current HACS validation workflow and simplified `hacs.json` metadata.
+
+### Preserved
+- Kept the browser-assisted mobile sign-in, current NETGEAR Accounts token flow, additional Canvas entities, local connection retries, and automatic local IP refresh from the previous fork betas.
+
 ## [2.4.1] - 2026-08-05
 
 WARNING: Do not update to this version unless you are running Home Assistant 2026.8+
 
 ### Fixed
-- Support for Home Assistant 2026.8+. The `boto3` requirement is now `>=1.42.97` to match the updated Home assistant dependency constraints.
+- Support for Home Assistant 2026.8+. The `boto3` requirement is now `>=1.42.97` to match the updated Home Assistant dependency constraints.
+
+## [2.4.0-beta.8] - 2026-07-25
+
+### Fixed
+- Updated the local Canvas client when the Meural cloud reports a changed DHCP IP address.
+- Removed the dependency on the media-player entity for propagating cloud device updates to local coordinators.
+- Replaced empty `DeviceTurnedOff` details with the attempted Canvas IP and underlying connection error.
+- Marked local entities unavailable after three consecutive failed updates, using Home Assistant's built-in one-time failure and recovery reporting instead of repeating warning reminders indefinitely.
+
+## [2.4.0-beta.7] - 2026-07-22
+
+### Fixed
+- Added one automatic retry for interrupted, read-only Canvas requests.
+- Prevented reuse of HTTP connections that the embedded Canvas web server may reset.
+- Kept transient local connection failures at debug level and only warn after three consecutive failed updates, with rate-limited reminders during a longer outage.
+- Continued serving cached Canvas state during temporary local connection failures.
+
+## [2.4.0-beta.6] - 2026-07-21
+
+### Added
+- Added a local **Display Orientation** select for portrait and landscape mode.
+- Added **Orientation Match** and **Sleep When Dark** switches for supported Canvases.
+- Added **Light Sensitivity** and **Artwork Duration** number entities.
+- Added **Image Fit Mode** and **Letterbox Color** select entities.
+- Added a **Physical Orientation** sensor based on the Canvas accelerometer.
+
+### Improved
+- Preserved all cached local sensor and orientation values during temporary Canvas connection failures.
+
+## [2.4.0-beta.5] - 2026-07-21
+
+### Added
+- Added an **Auto Brightness** switch for each Canvas that exposes the Meural `alsEnabled` cloud setting.
+
+### Improved
+- Made the backlight light entity's brightness state more reliable by falling back to the Canvas `/remote/get_backlight/` endpoint when the general system response does not contain a backlight value.
+- Documented where Home Assistant displays the light entity's brightness slider.
+
+## [2.4.0-beta.4] - 2026-07-21
+
+### Changed
+- Simplified setup and reauthentication to two choices: normal sign-in from Home Assistant for connections without an IP block, and browser-assisted mobile sign-in for NETGEAR WAF/IP blocks.
+
+### Removed
+- Removed the temporary HTTP CONNECT proxy option and all supporting proxy code, validation, tests, and active documentation.
+
+## [2.4.0-beta.3] - 2026-07-21
+
+### Added
+- Added a browser-assisted mobile sign-in option for NETGEAR WAF/IP blocks. Home Assistant provides a one-time link that can be opened on a phone using mobile data, so the Cognito authentication requests originate from the phone instead of the blocked Home Assistant connection.
+- The one-time link expires after 10 minutes and accepts a result only once. The NETGEAR email, password, and verification code stay in the phone browser and are sent directly to Cognito; Home Assistant receives only the short-lived Cognito access token needed for the Meural token exchange.
+- Kept direct password authentication and the temporary HTTP CONNECT proxy as alternative sign-in methods.
+
+## [2.4.0-beta.2] - 2026-07-21
+
+### Added
+- Added an optional temporary HTTP CONNECT proxy for interactive login and OTP challenges. This allows a blocked home IP to complete NETGEAR authentication through a trusted device on another connection without routing all Home Assistant traffic through a VPN.
+- The temporary proxy is validated, used only by the active config flow, and never stored in the Home Assistant config entry.
+
+## [2.4.0-beta.1] - 2026-07-15
+
+### Fixed
+- Replaced the legacy direct Cognito token flow with the current NETGEAR Accounts flow: Cognito `CUSTOM_AUTH`, optional OTP/MFA challenge handling, OAuth token exchange, and Meural token refresh through `accounts2.netgear.com`.
+- Stopped background password logins after a token failure, preventing repeated OTP messages and AWS WAF retry storms.
+- Added a complete Home Assistant reauthentication flow for expired legacy sessions.
+
+### Changed
+- Cloud requests now use the Meural v1 API and current web-client headers.
+- Background token refresh no longer repeats the password login.
+- Removed the `boto3` dependency; Cognito calls now use Home Assistant's shared async HTTP session.
 
 ## [2.3.0] - 2026-05-19
 

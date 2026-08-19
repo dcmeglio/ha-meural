@@ -1,4 +1,5 @@
 """DataUpdateCoordinator for Meural integration."""
+
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +9,6 @@ from datetime import timedelta
 from typing import Any
 
 import aiohttp
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -20,9 +20,30 @@ from .const import (
     GALLERY_UPDATE_INTERVAL,
     LOCAL_UPDATE_INTERVAL,
 )
-from .pymeural import CannotConnect, DeviceTurnedOff, InvalidAuth, LocalMeural, PyMeural
+from .netgear_auth import AuthenticationBlocked, CannotConnect, InvalidAuth
+from .pymeural import DeviceTurnedOff, LocalMeural, PyMeural
 
 _LOGGER = logging.getLogger(__name__)
+
+LOCAL_FAILURE_WARNING_THRESHOLD = 3
+
+
+def _normalize_backlight(value: Any) -> int | None:
+    """Normalize a Canvas backlight response to a percentage."""
+    if isinstance(value, dict):
+        for key in ("backlight", "brightness", "value"):
+            if key in value:
+                value = value[key]
+                break
+        else:
+            return None
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        level = round(float(str(value).rstrip("%")))
+    except (TypeError, ValueError):
+        return None
+    return max(0, min(100, level))
 
 
 class CloudDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -50,7 +71,7 @@ class CloudDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     def register_local_coordinator(
-        self, device_id: str, local_coordinator: "LocalDataUpdateCoordinator"
+        self, device_id: str, local_coordinator: LocalDataUpdateCoordinator
     ) -> None:
         """Register a local coordinator for sleep state tracking."""
         self._local_coordinators[device_id] = local_coordinator
@@ -63,8 +84,14 @@ class CloudDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _update_polling_interval(self) -> None:
         """Update polling interval based on all devices' sleep states."""
-        awake_count = sum(1 for coord in self._local_coordinators.values() if not coord.sleeping)
-        new_interval = timedelta(seconds=CLOUD_UPDATE_INTERVAL if awake_count else CLOUD_UPDATE_INTERVAL_SLEEPING)
+        awake_count = sum(
+            1 for coord in self._local_coordinators.values() if not coord.sleeping
+        )
+        new_interval = timedelta(
+            seconds=CLOUD_UPDATE_INTERVAL
+            if awake_count
+            else CLOUD_UPDATE_INTERVAL_SLEEPING
+        )
 
         if self.update_interval != new_interval:
             _LOGGER.debug(
@@ -77,6 +104,22 @@ class CloudDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def notify_sleep_state_changed(self) -> None:
         """Called when a local coordinator's sleep state may have changed."""
         self._update_polling_interval()
+
+    async def async_apply_device_setting(
+        self, device_id: str, key: str, value: Any
+    ) -> None:
+        """Write a cloud-backed device setting and reflect it optimistically.
+
+        Patches the coordinator's cached device data immediately so entities
+        show the new value without waiting for the next poll to confirm it.
+        """
+        await self.meural.update_device(device_id, {key: value})
+
+        if self.data:
+            device = self.data.get("devices", {}).get(device_id)
+            if device is not None:
+                device[key] = value
+                self.async_set_updated_data(self.data)
 
     @property
     def galleries_stale(self) -> bool:
@@ -119,7 +162,13 @@ class CloudDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Meural Cloud: Gallery data refreshed (%d user galleries)",
                 len(user_galleries),
             )
-        except (InvalidAuth, CannotConnect, aiohttp.ClientError, asyncio.TimeoutError) as err:
+        except (
+            InvalidAuth,
+            CannotConnect,
+            AuthenticationBlocked,
+            aiohttp.ClientError,
+            asyncio.TimeoutError,
+        ) as err:
             _LOGGER.warning("Meural Cloud: Failed to refresh gallery data: %s", err)
         finally:
             self._gallery_refresh_in_progress = False
@@ -130,6 +179,13 @@ class CloudDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Only fetch device settings on the regular poll interval.
             # Gallery data is fetched separately via async_refresh_galleries().
             devices = await self.meural.get_user_devices()
+            devices_by_id = {str(device["id"]): device for device in devices}
+
+            # Keep the local clients on the IP currently reported by the cloud.
+            # Canvas IP addresses can change after DHCP lease renewals.
+            for device_id, local_coordinator in self._local_coordinators.items():
+                if device := devices_by_id.get(device_id):
+                    local_coordinator.update_device(device)
 
             # Preserve existing gallery data between polls
             existing = self.data or {}
@@ -141,7 +197,7 @@ class CloudDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.hass.async_create_task(self.async_refresh_galleries())
 
             return {
-                "devices": {str(device["id"]): device for device in devices},
+                "devices": devices_by_id,
                 "device_galleries": device_galleries,
                 "user_galleries": user_galleries,
             }
@@ -152,10 +208,18 @@ class CloudDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise ConfigEntryAuthFailed(
                 "Authentication failed. Please reauthenticate."
             ) from err
-        except (CannotConnect, aiohttp.ClientError, asyncio.TimeoutError) as err:
+        except (
+            CannotConnect,
+            AuthenticationBlocked,
+            aiohttp.ClientError,
+            asyncio.TimeoutError,
+        ) as err:
             # Network error (including upstream WAF/rate-limit blocks) - raise
-            # UpdateFailed for retry, without triggering the reauth flow.
-            raise UpdateFailed(f"Error communicating with Meural cloud API: {err}") from err
+            # UpdateFailed for retry, without triggering the reauth flow, since
+            # re-entering credentials can't fix a WAF block or a transient outage.
+            raise UpdateFailed(
+                f"Error communicating with Meural cloud API: {err}"
+            ) from err
         except Exception as err:
             # Unexpected error
             _LOGGER.exception("Unexpected error updating Meural cloud data")
@@ -176,6 +240,7 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.device_id = str(device["id"])
         self.local_meural = LocalMeural(device, session)
         self._sleeping = True
+        self._local_failure_count = 0
         self.cloud_coordinator: CloudDataUpdateCoordinator | None = None
 
         super().__init__(
@@ -188,7 +253,15 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def update_device(self, device: dict[str, Any]) -> None:
         """Update device reference with latest cloud data."""
         self.device = device
-        self.local_meural.device = device
+        previous_ip = self.local_meural.ip
+        if self.local_meural.update_device(device):
+            _LOGGER.info(
+                "Meural device %s: Local IP changed from %s to %s",
+                device.get("alias", self.device_id),
+                previous_ip,
+                self.local_meural.ip,
+            )
+            self._local_failure_count = 0
 
     @property
     def sleeping(self) -> bool:
@@ -201,6 +274,84 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.cloud_coordinator is not None:
             self.cloud_coordinator.notify_sleep_state_changed()
         self.async_update_listeners()
+
+    async def _async_get_backlight(
+        self, system_value: Any, fallback: Any = None
+    ) -> int | None:
+        """Get brightness from system data or the dedicated local endpoint."""
+        backlight = _normalize_backlight(system_value)
+        if backlight is not None:
+            return backlight
+
+        try:
+            backlight = _normalize_backlight(
+                await self.local_meural.send_get_backlight()
+            )
+        except (DeviceTurnedOff, aiohttp.ClientError, asyncio.TimeoutError):
+            backlight = None
+
+        return backlight if backlight is not None else _normalize_backlight(fallback)
+
+    @staticmethod
+    def _parse_system_fields(system_info: dict[str, Any]) -> dict[str, Any]:
+        """Extract sensor fields reported by send_get_system(), excluding backlight.
+
+        Backlight needs the raw value alongside a possible dedicated-endpoint
+        fallback (see _async_get_backlight), so it's handled separately by callers.
+        """
+        wifi_status = system_info.get("wifi_status", {})
+        return {
+            "gsensor": system_info.get("gsensor"),
+            "orientation": system_info.get("orientation"),
+            "lux": system_info.get("lux"),
+            "free_space": system_info.get("free_space"),
+            "wifi_signal": wifi_status.get("signal"),
+            "version": system_info.get("version"),
+        }
+
+    def _mark_local_update_successful(self) -> None:
+        """Clear the transient local failure counter after a successful update."""
+        if self._local_failure_count:
+            _LOGGER.debug(
+                "Meural device %s: Local connection recovered after %d failed update(s)",
+                self.device.get("alias", self.device_id),
+                self._local_failure_count,
+            )
+            self._local_failure_count = 0
+
+    def _cached_data_after_connection_failure(self, err: Exception) -> dict[str, Any]:
+        """Return cached data briefly, then mark the local coordinator unavailable."""
+        self._local_failure_count += 1
+        reason = str(err).strip() or err.__class__.__name__
+        _LOGGER.debug(
+            "Meural device %s: Local update failed %d consecutive time(s); "
+            "using cached data from %s (%s)",
+            self.device.get("alias", self.device_id),
+            self._local_failure_count,
+            self.local_meural.ip,
+            reason,
+        )
+
+        if self._local_failure_count >= LOCAL_FAILURE_WARNING_THRESHOLD:
+            raise UpdateFailed(
+                f"Cannot reach {self.device.get('alias', self.device_id)} at "
+                f"{self.local_meural.ip} after {self._local_failure_count} updates: "
+                f"{reason}"
+            ) from err
+
+        cached = self.data or {}
+        return {
+            "sleeping": self._sleeping,
+            "galleries": cached.get("galleries", []),
+            "gallery_status": cached.get("gallery_status", {}),
+            "gsensor": cached.get("gsensor"),
+            "orientation": cached.get("orientation"),
+            "lux": cached.get("lux"),
+            "backlight": cached.get("backlight"),
+            "free_space": cached.get("free_space"),
+            "wifi_signal": cached.get("wifi_signal"),
+            "version": cached.get("version"),
+        }
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from Meural local device API."""
@@ -215,33 +366,31 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Device is sleeping; skip gallery fetches but still poll sensor data —
                 # the local web server remains running during sleep mode.
                 cached = self.data or {}
-                gsensor = cached.get("gsensor")
-                lux = cached.get("lux")
-                backlight = cached.get("backlight")
-                free_space = cached.get("free_space")
-                wifi_signal = cached.get("wifi_signal")
-                version = cached.get("version")
+                fields: dict[str, Any] = {
+                    "gsensor": cached.get("gsensor"),
+                    "orientation": cached.get("orientation"),
+                    "lux": cached.get("lux"),
+                    "free_space": cached.get("free_space"),
+                    "wifi_signal": cached.get("wifi_signal"),
+                    "version": cached.get("version"),
+                }
+                system_backlight = None
                 try:
                     system_info = await self.local_meural.send_get_system()
-                    gsensor = system_info.get("gsensor")
-                    lux = system_info.get("lux")
-                    backlight = system_info.get("backlight")
-                    free_space = system_info.get("free_space")
-                    wifi_status = system_info.get("wifi_status", {})
-                    wifi_signal = wifi_status.get("signal")
-                    version = system_info.get("version")
+                    fields = self._parse_system_fields(system_info)
+                    system_backlight = system_info.get("backlight")
                 except (aiohttp.ClientError, asyncio.TimeoutError):
                     pass  # Fall back to cached values initialized above
+                backlight = await self._async_get_backlight(
+                    system_backlight, cached.get("backlight")
+                )
+                self._mark_local_update_successful()
                 return {
                     "sleeping": True,
                     "galleries": cached.get("galleries", []),
                     "gallery_status": cached.get("gallery_status", {}),
-                    "gsensor": gsensor,
-                    "lux": lux,
                     "backlight": backlight,
-                    "free_space": free_space,
-                    "wifi_signal": wifi_signal,
-                    "version": version,
+                    **fields,
                 }
 
             # Device is awake, get full data
@@ -250,34 +399,34 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             # Get gsensor orientation for orientationMatch detection and lux for illuminance sensor.
             # Failure here is non-critical; omit the keys so callers can detect absence.
-            gsensor = None
-            lux = None
-            backlight = None
-            free_space = None
-            wifi_signal = None
-            version = None
+            fields = {
+                "gsensor": None,
+                "orientation": None,
+                "lux": None,
+                "free_space": None,
+                "wifi_signal": None,
+                "version": None,
+            }
+            cached_backlight = (self.data or {}).get("backlight")
+            system_backlight = None
             try:
                 system_info = await self.local_meural.send_get_system()
-                gsensor = system_info.get("gsensor")
-                lux = system_info.get("lux")
-                backlight = system_info.get("backlight")
-                free_space = system_info.get("free_space")
-                wifi_status = system_info.get("wifi_status", {})
-                wifi_signal = wifi_status.get("signal")
-                version = system_info.get("version")
+                fields = self._parse_system_fields(system_info)
+                system_backlight = system_info.get("backlight")
             except (aiohttp.ClientError, asyncio.TimeoutError):
                 pass
 
+            backlight = await self._async_get_backlight(
+                system_backlight, cached_backlight
+            )
+
+            self._mark_local_update_successful()
             return {
                 "sleeping": False,
                 "galleries": sorted(galleries, key=lambda i: i["name"]),
                 "gallery_status": gallery_status,
-                "gsensor": gsensor,
-                "lux": lux,
                 "backlight": backlight,
-                "free_space": free_space,
-                "wifi_signal": wifi_signal,
-                "version": version,
+                **fields,
             }
 
         except (DeviceTurnedOff, aiohttp.ClientError, asyncio.TimeoutError) as err:
@@ -286,26 +435,16 @@ class LocalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # DeviceTurnedOff (ClientConnectorError) is also transient - the local web
             # server remains running during Meural sleep mode, so this only means the
             # device temporarily dropped off the network, not that it is genuinely sleeping.
-            _LOGGER.warning(
-                "Meural device %s: Failed to contact local device (%s)",
-                self.device.get("alias", self.device_id),
-                err,
-            )
-            _LOGGER.debug(
-                "Meural device %s: Returning cached data due to connection failure",
-                self.device.get("alias", self.device_id),
-            )
-            cached = self.data or {}
-            return {
-                "sleeping": self._sleeping,
-                "galleries": cached.get("galleries", []),
-                "gallery_status": cached.get("gallery_status", {}),
-            }
-        except Exception as err:
+            return self._cached_data_after_connection_failure(err)
+        except Exception:
             # Unexpected error
             _LOGGER.exception(
                 "Unexpected error updating Meural local device %s",
                 self.device.get("alias", self.device_id),
             )
             # Don't fail integration, just return last known data
-            return self.data or {"sleeping": True, "galleries": [], "gallery_status": {}}
+            return self.data or {
+                "sleeping": True,
+                "galleries": [],
+                "gallery_status": {},
+            }

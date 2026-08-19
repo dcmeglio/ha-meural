@@ -1,11 +1,10 @@
 """Light platform for Meural integration — controls Canvas backlight brightness."""
+
 from __future__ import annotations
 
 import logging
 import math
 from typing import Any
-
-_LOGGER = logging.getLogger(__name__)
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
@@ -19,6 +18,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import CloudDataUpdateCoordinator, LocalDataUpdateCoordinator
+from .entity import MeuralDeviceInfoMixin
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -29,7 +31,9 @@ async def async_setup_entry(
     """Set up Meural light entities."""
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
     cloud_coordinator: CloudDataUpdateCoordinator = entry_data["cloud_coordinator"]
-    local_coordinators: dict[str, LocalDataUpdateCoordinator] = entry_data["local_coordinators"]
+    local_coordinators: dict[str, LocalDataUpdateCoordinator] = entry_data[
+        "local_coordinators"
+    ]
 
     devices = list(cloud_coordinator.data["devices"].values())
 
@@ -42,7 +46,9 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightEntity):
+class MeuralBacklightLight(
+    MeuralDeviceInfoMixin, CoordinatorEntity[LocalDataUpdateCoordinator], LightEntity
+):
     """Backlight brightness control for a Meural Canvas device."""
 
     _attr_color_mode = ColorMode.BRIGHTNESS
@@ -66,20 +72,15 @@ class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightE
         self._optimistic_brightness = None
         super()._handle_coordinator_update()
 
-    @property
-    def device_info(self) -> dict[str, Any]:
-        """Return device information to link this entity to the Meural device."""
-        return {
-            "identifiers": {(DOMAIN, self._device["productKey"])},
-        }
-
     def _meural_brightness(self) -> int | None:
         """Return current backlight as a Meural value (0-100), or None if unavailable."""
         if not self.coordinator.data:
             return None
         raw = self.coordinator.data.get("backlight")
         try:
-            return int(raw) if raw is not None else None
+            if raw is None:
+                return None
+            return max(0, min(100, int(raw)))
         except (ValueError, TypeError):
             return None
 
@@ -101,20 +102,31 @@ class MeuralBacklightLight(CoordinatorEntity[LocalDataUpdateCoordinator], LightE
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on / set brightness. Wakes device first if sleeping."""
         if self.coordinator.sleeping:
-            _LOGGER.info("Meural device %s: Turning on backlight (waking device)", self._device["alias"])
+            _LOGGER.info(
+                "Meural device %s: Turning on backlight (waking device)",
+                self._device["alias"],
+            )
             await self.coordinator.local_meural.send_key_resume()
             self.coordinator.set_sleeping_optimistic(False)
         ha_brightness = kwargs.get(ATTR_BRIGHTNESS)
         if ha_brightness is not None:
             meural_brightness = round(ha_brightness * 100 / 255)
-            _LOGGER.info("Meural device %s: Setting backlight to %s%%", self._device["alias"], meural_brightness)
-            await self.coordinator.local_meural.send_control_backlight(meural_brightness)
+            _LOGGER.info(
+                "Meural device %s: Setting backlight to %s%%",
+                self._device["alias"],
+                meural_brightness,
+            )
+            await self.coordinator.local_meural.send_control_backlight(
+                meural_brightness
+            )
             self._optimistic_brightness = ha_brightness
             self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off backlight by suspending the Canvas device."""
-        _LOGGER.info("Meural device %s: Turning off backlight (suspending device)", self._device["alias"])
+        _LOGGER.info(
+            "Meural device %s: Turning off backlight (suspending device)",
+            self._device["alias"],
+        )
         await self.coordinator.local_meural.send_key_suspend()
         self.coordinator.set_sleeping_optimistic(True)
-

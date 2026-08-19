@@ -2,27 +2,53 @@
   "config": {
     "step": {
       "user": {
+        "description": "Choose how to sign in to your NETGEAR account.",
+        "menu_options": {
+          "mobile_login": "Sign in on a phone to bypass a WAF/IP block",
+          "password_login": "Sign in normally from Home Assistant"
+        }
+      },
+      "reauth_method": {
+        "description": "Sign in again for {email}. Choose how to connect to NETGEAR.",
+        "menu_options": {
+          "mobile_login": "Sign in on a phone to bypass a WAF/IP block",
+          "password_login": "Sign in normally from Home Assistant"
+        }
+      },
+      "password_login": {
+        "description": "Sign in with your NETGEAR account. NETGEAR may send a one-time verification code.",
         "data": {
           "email": "Email",
           "password": "[%key:common::config_flow::data::password%]"
         }
       },
-      "reauth_confirm": {
-        "title": "Reauthenticate Meural",
-        "description": "The Meural integration needs to re-authenticate for {email}.",
+      "mobile_login": {
+        "description": "Open the one-time website on a phone, turn off Wi-Fi, and complete the NETGEAR sign-in using mobile data. The link expires after 10 minutes."
+      },
+      "mobile_finish": {
+        "description": "Home Assistant received the mobile sign-in and is completing the Meural token exchange. Submit to retry this final exchange if NETGEAR temporarily rejected it."
+      },
+      "challenge": {
+        "description": "Enter the verification response for {challenge} sent to {destination}.",
         "data": {
-          "password": "[%key:common::config_flow::data::password%]"
+          "verification_code": "Verification code"
         }
       }
     },
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
       "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
+      "invalid_code": "The verification code is invalid or expired",
+      "auth_blocked": "NETGEAR temporarily blocked this sign-in. Stop retrying and try again later.",
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
-      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
+      "reauth_successful": "Reauthentication was successful",
+      "challenge_expired": "The verification session expired. Start signing in again.",
+      "wrong_account": "The account does not match the account that needs reauthentication.",
+      "external_url_unavailable": "Home Assistant could not determine the external address used by this browser. Open Home Assistant through its external HTTPS address and try again.",
+      "mobile_login_expired": "The mobile sign-in result expired. Start the sign-in again."
     }
   }
 }

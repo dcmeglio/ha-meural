@@ -1,4 +1,5 @@
 """The Meural integration."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,6 +7,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN
@@ -14,7 +16,8 @@ from .coordinator import CloudDataUpdateCoordinator, LocalDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player", "sensor", "light"]
+PLATFORMS = ["media_player", "sensor", "light", "switch", "select", "number"]
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: dict):
@@ -26,25 +29,48 @@ async def async_setup(hass: HomeAssistant, config: dict):
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Meural from a config entry."""
     if "email" not in entry.data:
-        _LOGGER.warning("Authentication changed. Please set up Meural again")
+        _LOGGER.warning("Meural: Authentication changed. Please set up Meural again")
         return False
 
-    def token_update_callback(token: str, refresh_token: str) -> None:
-        """Update both access token and refresh token in config entry."""
-        _LOGGER.debug("Tokens updated. Saving to config entry.")
+    # Earlier builds persisted the account password alongside the tokens.
+    # It is never read back (reauth asks interactively), so scrub it.
+    if "password" in entry.data:
+        _LOGGER.info(
+            "Meural: Removing stored account password from config entry; "
+            "it is no longer used"
+        )
+        data = dict(entry.data)
+        data.pop("password")
+        hass.config_entries.async_update_entry(entry, data=data)
+
+    def token_update_callback(
+        token: str,
+        refresh_token: str,
+        expires_at: float,
+        trust_id: str,
+    ) -> None:
+        """Persist rotated Meural OAuth tokens."""
+        _LOGGER.debug("Meural: Tokens updated. Saving to config entry")
         hass.config_entries.async_update_entry(
             entry,
-            data={**entry.data, "token": token, "refresh_token": refresh_token}
+            data={
+                **entry.data,
+                "token": token,
+                "refresh_token": refresh_token,
+                "expires_at": expires_at,
+                "trust_id": trust_id,
+            },
         )
 
     # Create PyMeural instance with token refresh callback
     meural = pymeural.PyMeural(
-        entry.data["email"],
-        entry.data["password"],
         entry.data.get("token"),
         token_update_callback,
         async_get_clientsession(hass),
+        entry.entry_id,
         refresh_token=entry.data.get("refresh_token"),
+        expires_at=entry.data.get("expires_at"),
+        trust_id=entry.data.get("trust_id"),
     )
 
     # Create and initialize CloudDataUpdateCoordinator

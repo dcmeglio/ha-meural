@@ -25,13 +25,27 @@ Restart Home Assistant after copying.
 ### Setup
 After restarting go to *Settings*, *Devices & Services*, *Integrations*, and click *+ Add Integration* in the bottom right to add a new integration and find the Meural integration to set up.  
 
-Log in with your NETGEAR account.  
+Choose a NETGEAR sign-in method:
 
-**Note 1:** This integration does not yet support NETGEAR's two-step verification method of logging in. Please use the standard login and password method to use this integration.  
+- **Sign in normally from Home Assistant** when the Home Assistant connection is not blocked by NETGEAR.
+- **Sign in on a phone to bypass a WAF/IP block** when interactive login requests from the Home Assistant public IP are blocked.
 
-**Note 2:** If you are upgrading to v2.0.0 from v1.x, the upgrade is fully backward compatible — no re-configuration or re-authentication is needed. Home Assistant will handle the migration automatically on restart. However, if you are upgrading from v0.x, you have to delete this integration in *Settings*, *Devices & Services*, *Integrations*, and then re-add it to log in again. This will set up the configuration entries required by v1.0.0 and later.  
+If NETGEAR sends a one-time verification code by email, SMS, or an authenticator app, enter it in the Home Assistant challenge screen for a normal login or in the phone browser for a mobile login. Background token refresh uses the resulting Meural refresh token and does not repeat the password login.
 
-**Note 3:** If your login stops working, Home Assistant will prompt you to reauthenticate with a notification under *Settings* → *Devices & Services*. Since v2.4.0, this only happens for genuinely invalid credentials. Temporary upstream issues connecting to the Meural cloud (e.g. rate limiting) are treated as connectivity failures instead — the integration backs off and retries automatically rather than asking you to log in again.  
+#### Mobile workaround for a NETGEAR WAF/IP block
+
+1. Open Home Assistant through the external HTTPS address that also works on your phone.
+2. Start Meural setup or reauthentication and choose **Sign in on a phone to bypass a WAF/IP block**.
+3. Open the one-time link on the phone and turn off Wi-Fi before entering the NETGEAR account details.
+4. Complete any NETGEAR verification challenge on the phone, then return to Home Assistant.
+
+The one-time link expires after 10 minutes and can submit a result only once. The account password and verification code are sent directly from the phone browser to NETGEAR Cognito; they are not sent back to or stored by Home Assistant. Home Assistant receives the short-lived Cognito result and completes the Meural token exchange. This requires Home Assistant to be reachable through an external HTTPS address. If NETGEAR also blocks the final token exchange from the home IP, stop retrying and wait for NETGEAR support to remove the block.
+
+#### "Setup of config entry ... cancelled" after mobile sign-in
+
+If the Home Assistant log shows `Setup of config entry '<email>' for meural integration cancelled` with a `CancelledError` right after completing mobile sign-in, the NETGEAR/Meural sign-in itself already succeeded — the cancellation happens later, while Home Assistant is connecting to the Canvas over the local network to finish setup. 
+
+Go to *Settings* → *Devices & Services* → *Meural* and select **Reload** on the entry (or restart Home Assistant if it isn't listed yet). Since sign-in already completed, this finishes setup without repeating the mobile sign-in.
 
 ### Media Player
 The integration will detect all Canvas devices registered to your account. Each Canvas will become a Media Player entity and can be added to your dashboard using any component that supports it, for example the standard Media Control card. By default your entity's name will correspond to the name of the Canvas, which out-of-the-box consists of a painter's name and 3 digits like `picasso-428` - resulting in the entity `media_player.picasso-428` being created. You can override the name and entity ID in Home Assistant's entity settings.  
@@ -66,10 +80,35 @@ A **Light** entity is created for each Canvas to control the backlight brightnes
 
 The backlight entity stays in sync with the media player entity — both reflect the same sleep/wake state.
 
+Open the light entity's detail dialog to use its brightness slider. Some Home Assistant dashboard rows show only the on/off button until the entity is opened; a Tile card with the brightness feature can keep the slider visible on a dashboard.
+
+### Automatic Brightness
+An **Auto Brightness** switch is created for each Canvas that reports support for the ambient light setting. Turning it on enables Meural's own ambient-light adjustment (`alsEnabled`); turning it off returns brightness control to the backlight slider. The switch uses the Meural cloud setting and replaces the need to call `meural.set_device_option` manually for this option.
+
+### Canvas Settings
+Supported Canvas settings are exposed as native Home Assistant entities instead of requiring `meural.set_device_option` service calls:
+
+- **Display Orientation** select — portrait or landscape, controlled through the local Canvas API.
+- **Orientation Match** switch — only show artwork matching the physical frame orientation.
+- **Sleep When Dark** switch — automatically sleep and wake with the room lighting.
+- **Light Sensitivity** number — ambient light sensor sensitivity from 0–100%.
+- **Artwork Duration** number — seconds between artwork changes; `0` pauses rotation.
+- **Image Fit Mode** select — contain, auto crop, as is, or stretch.
+- **Letterbox Color** select — black, grey, or white background around unfilled artwork.
+
+Cloud-backed setting entities are created only when the Canvas reports support for the corresponding setting.
+
+### Local connection stability
+
+The Canvas runs a small embedded web server that can occasionally reset or disconnect a request. The integration retries interrupted read-only requests once, uses a fresh HTTP connection for every local request, and keeps the last known state during a temporary interruption. If three consecutive updates fail, local entities become unavailable until communication recovers. The local client automatically follows IP address changes reported by the Meural cloud after DHCP lease renewals.
+
+Do not configure the same Canvas simultaneously in this integration and the separate **Meural Canvas (Local)** integration unless you specifically need both. Each integration polls the Canvas independently, which doubles the requests to its limited local web server and can increase connection resets.
+
 ### Sensors
-Four sensor entities are created for each Canvas:
+Five sensor entities are created for each Canvas:
 
 - **Ambient Light** — Illuminance in lux from the local device API. Useful for automations that respond to room lighting conditions. Updates every 10 seconds, including while the Canvas is sleeping.
+- **Physical Orientation** — Portrait or landscape orientation reported by the Canvas accelerometer.
 - **Free Space** — Available Canvas storage in megabytes from the local device API. Diagnostic; disabled by default.
 - **WiFi Signal** — WiFi signal strength in dBm from the local device API. Diagnostic; disabled by default.
 - **Last Seen by Cloud** — Timestamp of the last time the device contacted the Meural cloud, from the cloud API. Useful for connectivity monitoring. Diagnostic; disabled by default.

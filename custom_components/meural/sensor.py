@@ -1,11 +1,10 @@
 """Sensor platform for Meural integration."""
+
 from __future__ import annotations
 
 import logging
 from datetime import datetime
 from typing import Any
-
-_LOGGER = logging.getLogger(__name__)
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -13,7 +12,11 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import LIGHT_LUX, SIGNAL_STRENGTH_DECIBELS_MILLIWATT, UnitOfInformation
+from homeassistant.const import (
+    LIGHT_LUX,
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    UnitOfInformation,
+)
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -22,6 +25,9 @@ from homeassistant.util.dt import parse_datetime
 
 from .const import DOMAIN
 from .coordinator import CloudDataUpdateCoordinator, LocalDataUpdateCoordinator
+from .entity import MeuralDeviceInfoMixin
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -32,7 +38,9 @@ async def async_setup_entry(
     """Set up Meural sensor entities."""
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
     cloud_coordinator: CloudDataUpdateCoordinator = entry_data["cloud_coordinator"]
-    local_coordinators: dict[str, LocalDataUpdateCoordinator] = entry_data["local_coordinators"]
+    local_coordinators: dict[str, LocalDataUpdateCoordinator] = entry_data[
+        "local_coordinators"
+    ]
 
     devices = list(cloud_coordinator.data["devices"].values())
 
@@ -41,6 +49,7 @@ async def async_setup_entry(
         _LOGGER.info("Adding Meural sensors for device %s", device["alias"])
         local_coordinator = local_coordinators[str(device["id"])]
         entities.append(MeuralLuxSensor(local_coordinator, device))
+        entities.append(MeuralPhysicalOrientationSensor(local_coordinator, device))
         entities.append(MeuralFreeSpaceSensor(local_coordinator, device))
         entities.append(MeuralWifiSignalSensor(local_coordinator, device))
         entities.append(MeuralLastSeenSensor(cloud_coordinator, device))
@@ -48,7 +57,9 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class MeuralCloudSensorBase(CoordinatorEntity[CloudDataUpdateCoordinator], SensorEntity):
+class MeuralCloudSensorBase(
+    MeuralDeviceInfoMixin, CoordinatorEntity[CloudDataUpdateCoordinator], SensorEntity
+):
     """Base class for Meural cloud-sourced sensor entities."""
 
     def __init__(
@@ -60,15 +71,10 @@ class MeuralCloudSensorBase(CoordinatorEntity[CloudDataUpdateCoordinator], Senso
         super().__init__(coordinator)
         self._device = device
 
-    @property
-    def device_info(self) -> dict[str, Any]:
-        """Return device information to link this entity to the Meural device."""
-        return {
-            "identifiers": {(DOMAIN, self._device["productKey"])},
-        }
 
-
-class MeuralSensorBase(CoordinatorEntity[LocalDataUpdateCoordinator], SensorEntity):
+class MeuralSensorBase(
+    MeuralDeviceInfoMixin, CoordinatorEntity[LocalDataUpdateCoordinator], SensorEntity
+):
     """Base class for Meural sensor entities."""
 
     def __init__(
@@ -79,13 +85,6 @@ class MeuralSensorBase(CoordinatorEntity[LocalDataUpdateCoordinator], SensorEnti
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._device = device
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        """Return device information to link this entity to the Meural device."""
-        return {
-            "identifiers": {(DOMAIN, self._device["productKey"])},
-        }
 
 
 class MeuralLuxSensor(MeuralSensorBase):
@@ -116,6 +115,37 @@ class MeuralLuxSensor(MeuralSensorBase):
             return float(raw) if raw is not None else None
         except (ValueError, TypeError):
             return None
+
+
+class MeuralPhysicalOrientationSensor(MeuralSensorBase):
+    """Physical orientation sensor for a Meural Canvas device."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["portrait", "landscape"]
+    _attr_icon = "mdi:screen-rotation"
+
+    def __init__(
+        self,
+        coordinator: LocalDataUpdateCoordinator,
+        device: dict[str, Any],
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, device)
+        self._attr_name = f"{device['alias']} Physical Orientation"
+        self._attr_unique_id = f"{device['id']}_physical_orientation"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the physical orientation reported by the accelerometer."""
+        if not self.coordinator.data:
+            return None
+        value = str(self.coordinator.data.get("gsensor", "")).lower()
+        return {
+            "portrait": "portrait",
+            "vertical": "portrait",
+            "landscape": "landscape",
+            "horizontal": "landscape",
+        }.get(value)
 
 
 class MeuralFreeSpaceSensor(MeuralSensorBase):
@@ -207,4 +237,3 @@ class MeuralLastSeenSensor(MeuralCloudSensorBase):
         if not raw:
             return None
         return parse_datetime(raw)
-
