@@ -15,12 +15,6 @@ play_random_cloud_playlist:
     entity_id:
       description: Entity ID of the Meural Canvas to update.
       example: "media_player.meural-123"
-  response:
-    optional: false
-    fields:
-      gallery_id:
-        description: Numeric ID of the selected gallery/playlist.
-        example: "12345"
 set_brightness:
   description: Change backlight brightness setting of the Meural Canvas.
   fields:
