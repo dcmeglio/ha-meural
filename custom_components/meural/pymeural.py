@@ -128,7 +128,7 @@ class PyMeural:
         return self.trust_id or f"entry:{self._entry_id}"
 
     async def request(
-        self, method: str, path: str, data: dict[str, Any] | None = None, , timeout: int = 10
+        self, method: str, path: str, data: dict[str, Any] | None = None, timeout: int = 10
     ) -> dict[str, Any]:
         url = f"{BASE_URL}{path}"
         kwargs = {}
