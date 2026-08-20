@@ -273,7 +273,7 @@ class PyMeural:
         self, device_id: str | int, gallery_id: str | int
     ) -> dict[str, Any]:
         """Load a gallery on a device."""
-        return await self.request("post", f"devices/{device_id}/galleries/{gallery_id}", timeout=30)
+        return await self.request("post", f"devices/{device_id}/galleries/{gallery_id}", timeout=60)
 
     async def delete_device_gallery(self, device_id: str | int, gallery_id: str | int) -> dict[str, Any]:
         """Remove a gallery from a device."""
