@@ -10,7 +10,7 @@ play_random_playlist:
       description: Whether to include the Recents playlist in the random selection. Defaults to true.
       example: "false"
 play_random_cloud_playlist:
-  description: Pick a random playlist from the Meural cloud and load it onto the Canvas. Returns the gallery_id of the selected playlist.
+  description: Pick a random playlist from the Meural cloud and load it onto the Canvas. Returns the id and name of the selected playlist.
   fields:
     entity_id:
       description: Entity ID of the Meural Canvas to update.
@@ -132,9 +132,3 @@ delete_playlist:
     gallery_name:
       description: Name of the gallery/playlist to remove. Provide either this or gallery_id. If both are provided, gallery_id takes precedence.
       example: "My Art Collection"
-delete_current_playlist:
-  description: Remove the currently playing playlist from the Meural Canvas.
-  fields:
-    entity_id:
-      description: Entity ID of the Meural Canvas to update.
-      example: "media_player.meural-123"
